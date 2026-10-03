@@ -1,0 +1,22 @@
+# Runtime configuration and credentials
+config.json
+patch-state.json
+*.log
+*.log.1
+
+# Official application backups must never be committed
+backups/
+app.asar
+app.asar.*
+*.official.bak
+
+# Local build output
+node_modules/
+*.zip
+*.sha256
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

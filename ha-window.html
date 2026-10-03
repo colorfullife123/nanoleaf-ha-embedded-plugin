@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:">
+  <title>Home Assistant 接入</title>
+  <link rel="stylesheet" href="ha-window.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">NANOLEAF DESKTOP · 本地插件</p>
+        <h1>Home Assistant 接入</h1>
+        <p class="subtitle">直接通过 Nanoleaf 内部 IPC 控制已配置的 Pegboard，无需调试端口。</p>
+      </div>
+      <div id="bridgeBadge" class="badge muted">正在检查</div>
+    </header>
+
+    <section class="panel status-grid">
+      <div class="metric">
+        <span>Windows 地址</span>
+        <strong id="pcIp">—</strong>
+      </div>
+      <div class="metric">
+        <span>HAOS 地址</span>
+        <strong id="haIp">—</strong>
+      </div>
+      <div class="metric">
+        <span>网关端口</span>
+        <strong id="port">17654</strong>
+      </div>
+      <div class="metric">
+        <span>Nanoleaf / 插件</span>
+        <strong id="versions">—</strong>
+      </div>
+    </section>
+
+    <section class="panel controls">
+      <div class="control-row">
+        <div>
+          <h2>HA 本地网关</h2>
+          <p>仅向配置的 HAOS 地址开放，访问时必须携带 Bearer 密钥。</p>
+        </div>
+        <label class="switch">
+          <input id="enabledToggle" type="checkbox">
+          <span></span>
+        </label>
+      </div>
+      <div class="control-row divider">
+        <div>
+          <h2>登录 Windows 后自动运行</h2>
+          <p>使用 Nanoleaf 官方登录启动并以隐藏模式进入托盘。</p>
+        </div>
+        <label class="switch">
+          <input id="autoStartToggle" type="checkbox">
+          <span></span>
+        </label>
+      </div>
+      <div class="token-row divider">
+        <div>
+          <span class="label">访问密钥</span>
+          <code id="tokenMasked">—</code>
+        </div>
+        <div class="button-row compact">
+          <button id="copyTokenButton" class="secondary">复制密钥</button>
+          <button id="regenerateTokenButton" class="danger-ghost">重新生成</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-heading">
+      <div>
+        <p class="eyebrow">实时设备</p>
+        <h2>桌面灯板</h2>
+      </div>
+      <button id="refreshButton" class="secondary">刷新状态</button>
+    </section>
+
+    <section class="device-grid">
+      <article class="device-card" data-key="j">
+        <div class="device-top">
+          <div class="device-icon">J</div>
+          <div>
+            <h3 data-role="name">桌面灯板 J</h3>
+            <p data-role="id">等待设备配置</p>
+          </div>
+          <div class="device-state" data-role="state">未知</div>
+        </div>
+        <div class="device-meta" data-role="meta">等待读取状态</div>
+        <div class="button-row">
+          <button data-action="on" class="primary">开启</button>
+          <button data-action="off" class="secondary">关闭</button>
+        </div>
+      </article>
+
+      <article class="device-card" data-key="k">
+        <div class="device-top">
+          <div class="device-icon">K</div>
+          <div>
+            <h3 data-role="name">桌面灯板 K</h3>
+            <p data-role="id">等待设备配置</p>
+          </div>
+          <div class="device-state" data-role="state">未知</div>
+        </div>
+        <div class="device-meta" data-role="meta">等待读取状态</div>
+        <div class="button-row">
+          <button data-action="on" class="primary">开启</button>
+          <button data-action="off" class="secondary">关闭</button>
+        </div>
+      </article>
+
+      <article class="device-card wide" data-key="all">
+        <div class="device-top">
+          <div class="device-icon all">ALL</div>
+          <div>
+            <h3>全部桌面灯板</h3>
+            <p data-role="summary">同时控制所有已配置灯板</p>
+          </div>
+          <div class="device-state" data-role="state">未知</div>
+        </div>
+        <div class="device-meta" data-role="meta">等待读取状态</div>
+        <div class="button-row">
+          <button data-action="on" class="primary">全部开启</button>
+          <button data-action="off" class="secondary">全部关闭</button>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel footer-panel">
+      <div>
+        <h2>Home Assistant 配置</h2>
+        <p>现有配置可继续使用。密钥变化后请重新复制 YAML。</p>
+      </div>
+      <div class="button-row wrap">
+        <button id="copyYamlButton" class="primary">复制 HA YAML</button>
+        <button id="openFolderButton" class="secondary">打开插件目录</button>
+        <button id="prepareUpdateButton" class="warning">准备官方更新</button>
+      </div>
+    </section>
+
+    <div id="toast" class="toast" role="status"></div>
+  </main>
+  <script src="ha-window.js"></script>
+</body>
+</html>
