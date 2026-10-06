@@ -160,3 +160,6 @@ finally {
     }
     Remove-Item -LiteralPath $TempDir -Recurse -Force -ErrorAction SilentlyContinue
 }
+# The expected deferred launch returned 1. Do not let that intentional child
+# exit code turn the otherwise successful test step into a CI failure.
+$global:LASTEXITCODE = 0
