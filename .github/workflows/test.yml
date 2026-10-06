@@ -19,9 +19,12 @@ jobs:
       - name: Test GUI helper in Windows PowerShell 5.1
         shell: powershell
         run: .\tests\test-runtime.ps1
-      - name: Test automatic update recovery in Windows PowerShell 5.1
+      - name: Test startup update recovery in Windows PowerShell 5.1
         shell: powershell
         run: .\tests\test-repair.ps1
+      - name: Test hidden startup and on-demand task in Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\test-startup.ps1
       - name: Parse PowerShell scripts
         shell: pwsh
         run: |

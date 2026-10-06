@@ -7,7 +7,7 @@ process.noAsar = true;
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const PLUGIN_VERSION = "1.1.6";
+const PLUGIN_VERSION = "1.1.7";
 
 function paddedReplacement(target, replacement) {
   const remaining = Buffer.byteLength(target) - Buffer.byteLength(replacement);

@@ -244,6 +244,9 @@ $Files = @(
     "asar-patch.cjs",
     "runtime.ps1",
     "repair.ps1",
+    "startup.vbs",
+    "launch.ps1",
+    "startup-runtime.ps1",
     "prepare-update.ps1",
     "resume-after-update.ps1",
     "uninstall.ps1",
@@ -318,13 +321,11 @@ if ($Result.Stderr) { Write-Host $Result.Stderr.TrimEnd() }
 if ($Result.ExitCode -ne 0) { throw "app.asar 补丁失败，退出码 $($Result.ExitCode)" }
 
 $CurrentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+$ScriptHost = Join-Path $env:SystemRoot 'System32\wscript.exe'
+if (-not (Test-Path -LiteralPath $ScriptHost)) { throw 'Windows Script Host (wscript.exe) is required for hidden startup.' }
 $Action = New-ScheduledTaskAction `
-    -Execute "powershell.exe" `
-    -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$InstallDir\repair.ps1`""
-$Trigger = New-ScheduledTaskTrigger -AtLogOn -User $CurrentUser
-$Trigger.Delay = "PT45S"
-$UpdateTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
-    -RepetitionInterval (New-TimeSpan -Minutes 1)
+    -Execute $ScriptHost `
+    -Argument "//B //Nologo `"$InstallDir\startup.vbs`" --repair"
 $Principal = New-ScheduledTaskPrincipal `
     -UserId $CurrentUser `
     -LogonType Interactive `
@@ -338,10 +339,26 @@ $Settings = New-ScheduledTaskSettingsSet `
 Register-ScheduledTask `
     -TaskName $RepairTask `
     -Action $Action `
-    -Trigger @($Trigger, $UpdateTrigger) `
     -Principal $Principal `
     -Settings $Settings `
     -Force | Out-Null
+
+# Explicit launch shortcuts survive official updates and do not need to modify
+# the vendor executable or existing pinned shortcuts. The repair task has no
+# triggers; launch.ps1 runs it on demand before opening the app unelevated.
+$Shell = New-Object -ComObject WScript.Shell
+foreach ($Folder in @(
+    [Environment]::GetFolderPath('Desktop'),
+    [Environment]::GetFolderPath('Programs')
+)) {
+    $Shortcut = $Shell.CreateShortcut((Join-Path $Folder 'Nanoleaf Desktop (HA).lnk'))
+    $Shortcut.TargetPath = $ScriptHost
+    $Shortcut.Arguments = "//B //Nologo `"$InstallDir\startup.vbs`""
+    $Shortcut.WorkingDirectory = $InstallDir
+    $Shortcut.IconLocation = "$NanoleafExe,0"
+    $Shortcut.Description = '启动前检查 HA 插件，再打开 Nanoleaf Desktop'
+    $Shortcut.Save()
+}
 
 Start-Process $NanoleafExe
 
@@ -367,8 +384,9 @@ Write-Host "设备 J     : $DeviceJId"
 if ($DeviceKId) { Write-Host "设备 K     : $DeviceKId" }
 Write-Host "网关地址   : http://${PcIp}:$Port"
 Write-Host "应用入口   : Nanoleaf 主窗口左下角的 HA 按钮"
+Write-Host "启动检查   : 使用桌面/开始菜单 Nanoleaf Desktop (HA)，无定时检查"
 Write-Host "登录启动   : 已启用 --hidden（只进入托盘）"
-Write-Host "自动更新   : 每分钟检查，文件稳定后自动恢复已兼容版本"
+Write-Host "自动更新   : 下次通过 HA 启动入口打开时检查已兼容版本"
 Write-Host "退出方式   : 兼容清理后由 Nanoleaf 主进程自终止（无外部强制任务）"
 Write-Host "网关健康   : $HealthOk"
 if (-not $HealthOk) {

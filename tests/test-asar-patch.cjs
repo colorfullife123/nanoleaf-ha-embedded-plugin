@@ -114,7 +114,7 @@ try {
     run(patcher, "check", asarPath, 0);
     const state = readState();
     assert.equal(state.desktopVersion, version);
-    assert.equal(state.pluginVersion, "1.1.6");
+    assert.equal(state.pluginVersion, "1.1.7");
     assert.equal(state.beforeHash, digest(officialBytes));
     assert.equal(state.appliedPatches.length, 3);
     verifyCleanupWiring(state, version);

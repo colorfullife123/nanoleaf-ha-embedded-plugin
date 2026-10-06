@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PLUGIN_VERSION = "1.1.6";
+const PLUGIN_VERSION = "1.1.7";
 const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(PLUGIN_DIR, "config.json");
 const LOG_PATH = path.join(PLUGIN_DIR, "plugin.log");
@@ -737,6 +737,14 @@ function registerHandler(channel, handler) {
   ipcMain.handle(channel, handler);
 }
 
+function applyAutoStart(enabled) {
+  app.setLoginItemSettings({
+    openAtLogin: Boolean(enabled),
+    path: path.join(process.env.SystemRoot || "C:\\Windows", "System32", "wscript.exe"),
+    args: ["//B", "//Nologo", path.join(PLUGIN_DIR, "startup.vbs"), "--hidden"],
+  });
+}
+
 function installIpcHandlers() {
   ipcMain.removeAllListeners("nanoleaf-ha:open");
   ipcMain.on("nanoleaf-ha:open", () => openHaWindow());
@@ -760,10 +768,7 @@ function installIpcHandlers() {
     const config = loadConfig();
     config.autoStart = value;
     saveConfig(config);
-    app.setLoginItemSettings({
-      openAtLogin: value,
-      args: value ? ["--hidden"] : [],
-    });
+    applyAutoStart(value);
     return publicStatus();
   });
   registerHandler("nanoleaf-ha:copy-yaml", () => {
@@ -901,9 +906,7 @@ async function initialize() {
     const config = loadConfig();
     installIpcHandlers();
 
-    if (config.autoStart) {
-      app.setLoginItemSettings({ openAtLogin: true, args: ["--hidden"] });
-    }
+    applyAutoStart(config.autoStart);
 
     await startBridge();
     for (const window of nanoleafWindows()) {

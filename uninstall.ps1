@@ -36,6 +36,26 @@ if (Test-Path $Patcher) {
 
 Get-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue |
     Remove-NetFirewallRule -ErrorAction SilentlyContinue
+
+$Shell = New-Object -ComObject WScript.Shell
+foreach ($Folder in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {
+    $ShortcutPath = Join-Path $Folder 'Nanoleaf Desktop (HA).lnk'
+    if (Test-Path -LiteralPath $ShortcutPath) {
+        $Shortcut = $Shell.CreateShortcut($ShortcutPath)
+        if ($Shortcut.Arguments.Contains((Join-Path $InstallDir 'startup.vbs'))) {
+            Remove-Item -LiteralPath $ShortcutPath -Force
+        }
+    }
+}
+# Restore only the login entry that points to our launcher, keeping its name.
+$RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+if (Test-Path $RunKey) {
+    foreach ($Property in (Get-ItemProperty $RunKey).PSObject.Properties) {
+        if ($Property.Value -is [string] -and $Property.Value.Contains((Join-Path $InstallDir 'startup.vbs'))) {
+            Set-ItemProperty -LiteralPath $RunKey -Name $Property.Name -Value "`"$NanoleafExe`" --hidden"
+        }
+    }
+}
 Start-Process $NanoleafExe
 Write-Host "插件已卸载，Nanoleaf Desktop 已恢复为官方文件。" -ForegroundColor Green
 Write-Host "为便于恢复，配置与备份保留在 C:\ProgramData\NHA。"

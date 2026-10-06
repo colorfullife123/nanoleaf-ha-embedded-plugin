@@ -40,7 +40,7 @@ Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
     Format-Table -AutoSize
 
 if (Test-Path (Join-Path $InstallDir "repair-state.json")) {
-    Write-Host "===== Automatic update repair ====="
+    Write-Host "===== Startup repair ====="
     $RepairState = Get-Content (Join-Path $InstallDir "repair-state.json") -Raw | ConvertFrom-Json
     Write-Host "Status   : $($RepairState.status)"
     Write-Host "Observed : $($RepairState.observedAtUtc)"
@@ -52,8 +52,12 @@ if (Test-Path (Join-Path $InstallDir "repair.log")) {
 Write-Host "===== Scheduled tasks ====="
 Get-ScheduledTask -ErrorAction SilentlyContinue |
     Where-Object { $_.TaskName -eq "Nanoleaf HA Plugin Repair" } |
-    Select-Object TaskName, State |
+    Select-Object TaskName, State, @{Name='TriggerCount'; Expression={ @($_.Triggers).Count }} |
     Format-Table -AutoSize
+
+if (Test-Path (Join-Path $InstallDir "launch.log")) {
+    Get-Content (Join-Path $InstallDir "launch.log") -Tail 10
+}
 
 if (Test-Path (Join-Path $InstallDir "plugin.log")) {
     Write-Host "===== plugin.log (last 15 lines) ====="

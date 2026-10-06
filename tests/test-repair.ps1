@@ -1,44 +1,33 @@
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
-$TempDir = Join-Path $env:TEMP ('nha-auto-repair-test-' + [Guid]::NewGuid().ToString('N'))
+$TempDir = Join-Path $env:TEMP ('nha-startup-repair-test-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $TempDir | Out-Null
 $Asar = Join-Path $TempDir 'fake.asar'
 $Commands = Join-Path $TempDir 'commands.txt'
-$Actions = Join-Path $TempDir 'actions.txt'
 $StatePath = Join-Path $TempDir 'repair-state.json'
-$Node = (Get-Command node.exe).Source
-$EnvNames = @('NHA_TEST_DIR', 'NHA_TEST_REPAIR', 'NHA_TEST_EXE', 'NHA_TEST_ASAR', 'NHA_TEST_RUNNING', 'NHA_TEST_UPDATER', 'NHA_TEST_ACTIONS')
+$EnvNames = @('NHA_TEST_DIR', 'NHA_TEST_REPAIR', 'NHA_TEST_EXE', 'NHA_TEST_ASAR', 'NHA_TEST_RUNNING', 'NHA_TEST_UPDATER', 'NHA_TEST_CHANGE')
 $PreviousEnvironment = @{}
 foreach ($Name in $EnvNames) { $PreviousEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name) }
-
 function Assert-Test([bool]$Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
-function Read-Trace([string]$FilePath) {
-    if (Test-Path $FilePath) { return [IO.File]::ReadAllText($FilePath) }
+function Read-Trace {
+    if (Test-Path $Commands) { return [IO.File]::ReadAllText($Commands) }
     return ''
 }
-function Run-Repair {
+function Run-Repair([int]$ExpectedExit = 0) {
     $Output = & "$PSHOME\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File (Join-Path $TempDir 'run.ps1') 2>&1
-    Assert-Test ($LASTEXITCODE -eq 0) "Repair failed: $Output"
+    Assert-Test ($LASTEXITCODE -eq $ExpectedExit) "Repair failed: $Output (exit $LASTEXITCODE)"
 }
-function Age-PendingState {
-    $State = Get-Content $StatePath -Raw | ConvertFrom-Json
-    $State.observedAtUtc = [DateTime]::UtcNow.AddSeconds(-90).ToString('o')
-    $State | ConvertTo-Json | Set-Content $StatePath -Encoding UTF8
-}
-
 try {
     $env:NHA_TEST_DIR = $TempDir
     $env:NHA_TEST_REPAIR = Join-Path $Root 'repair.ps1'
-    $env:NHA_TEST_EXE = $Node
+    $env:NHA_TEST_EXE = (Get-Command node.exe).Source
     $env:NHA_TEST_ASAR = $Asar
-    $env:NHA_TEST_RUNNING = '1'
+    $env:NHA_TEST_RUNNING = '0'
     $env:NHA_TEST_UPDATER = '0'
-    $env:NHA_TEST_ACTIONS = $Actions
+    $env:NHA_TEST_CHANGE = '0'
     Copy-Item (Join-Path $Root 'VERSION') $TempDir
     Set-Content (Join-Path $TempDir 'config.json') '{"token":"TEST_ONLY_SECRET"}' -Encoding ASCII
     $OriginalConfig = [IO.File]::ReadAllBytes((Join-Path $TempDir 'config.json'))
-
-    # Mock the desktop/update processes so tests never close or launch an app.
     @'
 function Get-CimInstance {
     [CmdletBinding()]param([string]$ClassName)
@@ -48,17 +37,14 @@ function Get-Process {
     [CmdletBinding()]param([string]$Name)
     if ($env:NHA_TEST_RUNNING -eq '1') { [pscustomobject]@{ Id = 999999; Path = $env:NHA_TEST_EXE } }
 }
-function Stop-Process {
-    [CmdletBinding()]param([int]$Id, [switch]$Force)
-    [IO.File]::AppendAllText($env:NHA_TEST_ACTIONS, "stop`n")
+function Stop-Process { throw 'Startup repair must not stop the app' }
+function Start-Process { throw 'Startup repair must not launch the app' }
+function Start-Sleep {
+    param([int]$Seconds)
+    if ($env:NHA_TEST_CHANGE -eq '1') { Set-Content $env:NHA_TEST_ASAR 'changing' -Encoding ASCII }
 }
-function Start-Process {
-    [CmdletBinding()]param([string]$FilePath, $ArgumentList)
-    [IO.File]::AppendAllText($env:NHA_TEST_ACTIONS, "start:$ArgumentList`n")
-}
-. $env:NHA_TEST_REPAIR -InstallDir $env:NHA_TEST_DIR -NanoleafExe $env:NHA_TEST_EXE -AsarPath $env:NHA_TEST_ASAR
+. $env:NHA_TEST_REPAIR -InstallDir $env:NHA_TEST_DIR -NanoleafExe $env:NHA_TEST_EXE -AsarPath $env:NHA_TEST_ASAR -UpdaterWaitSeconds 0
 '@ | Set-Content (Join-Path $TempDir 'run.ps1') -Encoding ASCII
-
     @'
 const fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto");
 const [command, asar] = process.argv.slice(2);
@@ -68,59 +54,49 @@ if (command === "check") process.exit(value === "patched" ? 0 : value === "offic
 if (command !== "patch" || value !== "official") process.exit(1);
 fs.writeFileSync(asar, "patched");
 fs.writeFileSync(path.join(__dirname, "patch-state.json"), JSON.stringify({active:true, afterHash:crypto.createHash("sha256").update("patched").digest("hex")}));
-console.log("mock patch complete");
 '@ | Set-Content (Join-Path $TempDir 'asar-patch.cjs') -Encoding ASCII
 
     Set-Content $Asar 'official' -Encoding ASCII
     Run-Repair
-    Assert-Test (-not (Test-Path $Commands)) 'Unstable archive was checked prematurely'
-    Assert-Test ((Get-Content $StatePath -Raw | ConvertFrom-Json).status -eq 'pending') 'Missing pending state'
-    Age-PendingState
+    Assert-Test ((Read-Trace) -eq "check`npatch`n") 'First startup did not restore a supported update'
     Run-Repair
-    Assert-Test ((Read-Trace $Commands) -eq "check`npatch`n") 'Stable official build was not repaired'
-    Assert-Test ((Read-Trace $Actions) -eq "stop`nstart:--hidden`n") 'Running app was not restarted exactly once hidden'
-    Assert-Test ((Get-Content $StatePath -Raw | ConvertFrom-Json).status -eq 'active') 'Missing active state'
+    Assert-Test ((Read-Trace) -eq "check`npatch`n") 'Unchanged app spawned another helper'
 
-    $KnownCommands = Read-Trace $Commands
-    $KnownActions = Read-Trace $Actions
+    $env:NHA_TEST_UPDATER = '1'
+    Run-Repair 3
+    Assert-Test ((Read-Trace) -eq "check`npatch`n") 'Active updater was interrupted'
+    $env:NHA_TEST_UPDATER = '0'
     Run-Repair
-    $env:NHA_TEST_RUNNING = '0'
-    Run-Repair
-    Assert-Test ((Read-Trace $Commands) -eq $KnownCommands) 'Unchanged archive spawned another helper'
-    Assert-Test ((Read-Trace $Actions) -eq $KnownActions) 'Normal tray exit resurrected the app'
+    Assert-Test ((Get-Content $StatePath -Raw | ConvertFrom-Json).status -eq 'active') 'Patched hash was not recognized after deferral'
 
     Set-Content $Asar 'official' -Encoding ASCII
-    $env:NHA_TEST_UPDATER = '1'
+    $env:NHA_TEST_CHANGE = '1'
+    Run-Repair 3
+    Assert-Test ((Read-Trace) -eq "check`npatch`n") 'Changing file was patched'
+    $env:NHA_TEST_CHANGE = '0'
+
+    Set-Content $Asar 'official' -Encoding ASCII
+    $env:NHA_TEST_RUNNING = '1'
     Run-Repair
-    Assert-Test ((Read-Trace $Commands) -eq $KnownCommands) 'Active updater was interrupted'
-    $env:NHA_TEST_UPDATER = '0'
-    Age-PendingState
+    Assert-Test ((Read-Trace) -eq "check`npatch`ncheck`n") 'Running app was patched or restarted'
+    Assert-Test ((Get-Content $Asar -Raw).Trim() -eq 'official') 'Running app archive changed'
+    $env:NHA_TEST_RUNNING = '0'
     Run-Repair
-    Assert-Test ((Read-Trace $Commands) -eq ($KnownCommands + "check`npatch`n")) 'Closed app archive was not repaired'
-    Assert-Test ((Read-Trace $Actions) -eq $KnownActions) 'Repair launched an app that was already closed'
-    $KnownCommands = Read-Trace $Commands
+    Assert-Test ((Read-Trace) -eq "check`npatch`ncheck`ncheck`npatch`n") 'Closed app was not patched on next startup'
 
     Set-Content $Asar 'unknown-build' -Encoding ASCII
+    $Known = Read-Trace
     Run-Repair
-    Age-PendingState
-    Run-Repair
+    Assert-Test ((Read-Trace) -eq ($Known + "check`n")) 'Unknown build was patched'
     Assert-Test ((Get-Content $StatePath -Raw | ConvertFrom-Json).status -eq 'unsupported') 'Unknown build was not recorded'
-    Assert-Test ((Read-Trace $Commands) -eq ($KnownCommands + "check`n")) 'Unknown build was patched'
-    Assert-Test ((Read-Trace $Actions) -eq $KnownActions) 'Unknown build caused a restart'
-    $KnownCommands = Read-Trace $Commands
+    $Known = Read-Trace
     Run-Repair
-    Assert-Test ((Read-Trace $Commands) -eq $KnownCommands) 'Unknown unchanged build was checked repeatedly'
+    Assert-Test ((Read-Trace) -eq $Known) 'Unchanged unknown build spawned another helper'
     Set-Content (Join-Path $TempDir 'VERSION') 'new-test-version' -Encoding ASCII
     Run-Repair
-    Age-PendingState
-    Run-Repair
-    Assert-Test ((Read-Trace $Commands) -eq ($KnownCommands + "check`n")) 'New plugin version did not invalidate incompatible cache'
-    Assert-Test ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $TempDir 'config.json'))) -eq [Convert]::ToBase64String($OriginalConfig)) 'Repair changed configuration'
-
-    $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1)
-    Assert-Test ([Xml.XmlConvert]::ToTimeSpan($Trigger.Repetition.Interval).TotalSeconds -eq 60) 'Incorrect interval'
-    Assert-Test (-not $Trigger.Repetition.Duration) 'Repetition has a duration limit'
-    Write-Host 'Auto-repair stability, updater, restart, user exit, unknown version, cache, config and trigger tests passed.'
+    Assert-Test ((Read-Trace) -eq ($Known + "check`n")) 'New plugin did not invalidate cache'
+    Assert-Test ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $TempDir 'config.json'))) -eq [Convert]::ToBase64String($OriginalConfig)) 'Configuration changed'
+    Write-Host 'Startup repair, updater, changing files, cache, config and no stop/restart tests passed.'
 }
 finally {
     foreach ($Name in $EnvNames) { [Environment]::SetEnvironmentVariable($Name, $PreviousEnvironment[$Name]) }
