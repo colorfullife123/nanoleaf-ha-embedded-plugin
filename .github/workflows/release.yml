@@ -1,0 +1,107 @@
+name: publish-release
+
+on:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_COMMIT }}
+          persist-credentials: false
+      - name: Verify tested main commit and release intent
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)" = "$RELEASE_COMMIT"
+          conclusion=$(gh api "repos/$GH_REPO/actions/workflows/test.yml/runs?branch=main&head_sha=$RELEASE_COMMIT&event=push&status=completed" --jq '.workflow_runs[0].conclusion')
+          test "$conclusion" = success
+          version=$(tr -d '\r\n' < VERSION)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          # The current user authorization covers 1.1.7. Future versions
+          # require the maintainer to explicitly select Run workflow.
+          if [[ "$EVENT_NAME" = workflow_run && "$version" != 1.1.7 ]]; then
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if gh release view "v$version" > /dev/null 2>&1; then
+            echo 'Release already exists; leaving it unchanged.'
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo 'publish=true' >> "$GITHUB_OUTPUT"
+      - name: Package tracked source files and release notes
+        if: steps.release.outputs.publish == 'true'
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, re, subprocess, zipfile
+          root = pathlib.Path('.')
+          version = (root / 'VERSION').read_text().strip()
+          assert json.loads((root / 'package.json').read_text())['version'] == version
+          files = subprocess.check_output(['git', 'ls-files', '-z']).decode().rstrip('\0').split('\0')
+          forbidden = {'config.json', 'patch-state.json', 'repair-state.json', 'app.asar'}
+          for name in files:
+              p = pathlib.PurePosixPath(name)
+              assert p.name not in forbidden and not p.name.endswith(('.log', '.official.bak'))
+              assert 'backups' not in p.parts and 'node_modules' not in p.parts
+          out = root / 'dist'
+          out.mkdir()
+          archive = out / f'nanoleaf-ha-embedded-plugin-v{version}.zip'
+          with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+              for name in files:
+                  # Fixed metadata makes the ZIP reproducible from git bytes.
+                  info = zipfile.ZipInfo(name, (2020, 1, 1, 0, 0, 0))
+                  info.compress_type = zipfile.ZIP_DEFLATED
+                  info.external_attr = 0o100644 << 16
+                  data = subprocess.check_output(['git', 'show', f'HEAD:{name}'])
+                  z.writestr(info, data, compresslevel=9)
+          with zipfile.ZipFile(archive) as z:
+              assert z.testzip() is None
+              assert 'install.ps1' in z.namelist() and z.read('VERSION').strip().decode() == version
+          digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+          (out / (archive.name + '.sha256')).write_text(f'{digest}  {archive.name}\n')
+          changelog = (root / 'CHANGELOG.md').read_text()
+          match = re.search(r'^## ' + re.escape(version) + r'[^\n]*\n(.*?)(?=^## |\Z)', changelog, re.M | re.S)
+          assert match, 'Current version is missing from CHANGELOG.md'
+          notes = match.group(1).strip() + '\n\n下载下方安装包 ZIP，解压后运行：\n\n```powershell\nSet-ExecutionPolicy -Scope Process Bypass\n.\\install.ps1\n```\n\n首次安装请额外传入 `-HaIp <你的HAOS_IP>`；升级会复用已有配置与密钥。安装包为平铺目录，手动启动请使用安装器创建的 **Nanoleaf Desktop (HA)** 快捷方式；直接运行官方 EXE 会绕过启动检查。\n\n支持 Desktop 3.0.0/3.0.1 的精确兼容规则。Windows PowerShell 5.1 自动化测试已通过；新的启动入口和完整官方更新仍需设备验证。非官方扩展，包中不包含官方程序、个人配置或密钥。\n\nZIP SHA-256：`' + digest + '`\n'
+          (out / 'notes.md').write_text(notes)
+          print(archive.name, archive.stat().st_size, digest)
+          PY
+      - name: Create release and upload ZIP/checksum
+        if: steps.release.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          gh release create "v$VERSION" \
+            "dist/nanoleaf-ha-embedded-plugin-v$VERSION.zip" \
+            "dist/nanoleaf-ha-embedded-plugin-v$VERSION.zip.sha256" \
+            --target "$RELEASE_COMMIT" \
+            --title "Nanoleaf HA Embedded Plugin v$VERSION" \
+            --notes-file dist/notes.md --latest
