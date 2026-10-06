@@ -323,6 +323,8 @@ $Action = New-ScheduledTaskAction `
     -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$InstallDir\repair.ps1`""
 $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $CurrentUser
 $Trigger.Delay = "PT45S"
+$UpdateTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+    -RepetitionInterval (New-TimeSpan -Minutes 1)
 $Principal = New-ScheduledTaskPrincipal `
     -UserId $CurrentUser `
     -LogonType Interactive `
@@ -336,7 +338,7 @@ $Settings = New-ScheduledTaskSettingsSet `
 Register-ScheduledTask `
     -TaskName $RepairTask `
     -Action $Action `
-    -Trigger $Trigger `
+    -Trigger @($Trigger, $UpdateTrigger) `
     -Principal $Principal `
     -Settings $Settings `
     -Force | Out-Null
@@ -366,6 +368,7 @@ if ($DeviceKId) { Write-Host "设备 K     : $DeviceKId" }
 Write-Host "网关地址   : http://${PcIp}:$Port"
 Write-Host "应用入口   : Nanoleaf 主窗口左下角的 HA 按钮"
 Write-Host "登录启动   : 已启用 --hidden（只进入托盘）"
+Write-Host "自动更新   : 每分钟检查，文件稳定后自动恢复已兼容版本"
 Write-Host "退出方式   : 兼容清理后由 Nanoleaf 主进程自终止（无外部强制任务）"
 Write-Host "网关健康   : $HealthOk"
 if (-not $HealthOk) {
