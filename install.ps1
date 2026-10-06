@@ -99,11 +99,13 @@ $RepairTask = "Nanoleaf HA Plugin Repair"
 $LegacyExitCleanupTask = "Nanoleaf HA Exit Cleanup"
 $FirewallRule = "Nanoleaf HA Embedded Plugin"
 $OldTask = "Nanoleaf HA Gateway"
+$ScriptHost = Join-Path $env:SystemRoot 'System32\wscript.exe'
 . (Join-Path $PSScriptRoot "runtime.ps1")
 
 if (-not (Test-Path $NanoleafExe) -or -not (Test-Path $AsarPath)) {
     throw "未找到 Nanoleaf Desktop 3.x，请先安装官方桌面端。"
 }
+if (-not (Test-Path -LiteralPath $ScriptHost)) { throw 'Windows Script Host (wscript.exe) is required for hidden startup.' }
 
 Write-Host "正在安装 Nanoleaf HA 嵌入式插件..." -ForegroundColor Cyan
 
@@ -321,8 +323,6 @@ if ($Result.Stderr) { Write-Host $Result.Stderr.TrimEnd() }
 if ($Result.ExitCode -ne 0) { throw "app.asar 补丁失败，退出码 $($Result.ExitCode)" }
 
 $CurrentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$ScriptHost = Join-Path $env:SystemRoot 'System32\wscript.exe'
-if (-not (Test-Path -LiteralPath $ScriptHost)) { throw 'Windows Script Host (wscript.exe) is required for hidden startup.' }
 $Action = New-ScheduledTaskAction `
     -Execute $ScriptHost `
     -Argument "//B //Nologo `"$InstallDir\startup.vbs`" --repair"

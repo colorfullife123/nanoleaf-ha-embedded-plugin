@@ -15,7 +15,7 @@ function Read-Trace {
 }
 function Run-Repair([int]$ExpectedExit = 0) {
     $Output = & "$PSHOME\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File (Join-Path $TempDir 'run.ps1') 2>&1
-    Assert-Test ($LASTEXITCODE -eq $ExpectedExit) "Repair failed: $Output (exit $LASTEXITCODE)"
+    Assert-Test ($LASTEXITCODE -eq $ExpectedExit) "Repair failed: $Output (exit $LASTEXITCODE, expected $ExpectedExit)"
 }
 try {
     $env:NHA_TEST_DIR = $TempDir
@@ -44,6 +44,7 @@ function Start-Sleep {
     if ($env:NHA_TEST_CHANGE -eq '1') { Set-Content $env:NHA_TEST_ASAR 'changing' -Encoding ASCII }
 }
 . $env:NHA_TEST_REPAIR -InstallDir $env:NHA_TEST_DIR -NanoleafExe $env:NHA_TEST_EXE -AsarPath $env:NHA_TEST_ASAR -UpdaterWaitSeconds 0
+exit $LASTEXITCODE
 '@ | Set-Content (Join-Path $TempDir 'run.ps1') -Encoding ASCII
     @'
 const fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto");

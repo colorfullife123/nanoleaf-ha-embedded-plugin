@@ -124,6 +124,7 @@ if ($Existing) {
 }
 . (Join-Path $PSScriptRoot 'launch.ps1') -Hidden:$Hidden -InstallDir $env:NHA_TEST_DIR `
     -NanoleafExe (Join-Path $env:NHA_TEST_DIR 'desktop-test.exe') -TaskName $env:NHA_TEST_TASK
+exit $LASTEXITCODE
 '@ | Set-Content (Join-Path $TempDir 'run-launch.ps1') -Encoding ASCII
     Run-Launch
     Wait-AppTrace 1
