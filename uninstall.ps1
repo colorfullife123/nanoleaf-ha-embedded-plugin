@@ -9,6 +9,7 @@ $Patcher = Join-Path $InstallDir "asar-patch.cjs"
 $TaskName = "Nanoleaf HA Plugin Repair"
 $ExitCleanupTask = "Nanoleaf HA Exit Cleanup"
 $FirewallRule = "Nanoleaf HA Embedded Plugin"
+. (Join-Path $PSScriptRoot "runtime.ps1")
 
 $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $Principal = New-Object Security.Principal.WindowsPrincipal($Identity)
@@ -27,20 +28,10 @@ Get-Process "Nanoleaf Desktop" -ErrorAction SilentlyContinue |
 Start-Sleep -Seconds 2
 
 if (Test-Path $Patcher) {
-    try {
-        $PreviousRunAsNode = $env:ELECTRON_RUN_AS_NODE
-        $env:ELECTRON_RUN_AS_NODE = "1"
-        & $NanoleafExe $Patcher restore $AsarPath
-        if ($LASTEXITCODE -ne 0) { throw "还原失败，退出码 $LASTEXITCODE" }
-    }
-    finally {
-        if ($null -eq $PreviousRunAsNode) {
-            Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
-        }
-        else {
-            $env:ELECTRON_RUN_AS_NODE = $PreviousRunAsNode
-        }
-    }
+    $Result = Invoke-NhaPatcher -Exe $NanoleafExe -Patcher $Patcher -Command restore -Asar $AsarPath
+    if ($Result.Stdout) { Write-Host $Result.Stdout.TrimEnd() }
+    if ($Result.Stderr) { Write-Host $Result.Stderr.TrimEnd() }
+    if ($Result.ExitCode -ne 0) { throw "还原失败，退出码 $($Result.ExitCode)" }
 }
 
 Get-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue |

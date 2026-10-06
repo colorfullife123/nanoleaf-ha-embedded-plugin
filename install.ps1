@@ -99,12 +99,21 @@ $RepairTask = "Nanoleaf HA Plugin Repair"
 $LegacyExitCleanupTask = "Nanoleaf HA Exit Cleanup"
 $FirewallRule = "Nanoleaf HA Embedded Plugin"
 $OldTask = "Nanoleaf HA Gateway"
+. (Join-Path $PSScriptRoot "runtime.ps1")
 
 if (-not (Test-Path $NanoleafExe) -or -not (Test-Path $AsarPath)) {
     throw "未找到 Nanoleaf Desktop 3.x，请先安装官方桌面端。"
 }
 
 Write-Host "正在安装 Nanoleaf HA 嵌入式插件..." -ForegroundColor Cyan
+
+# Validate the new official build before changing the installed plugin/config.
+$CheckResult = Invoke-NhaPatcher -Exe $NanoleafExe `
+    -Patcher (Join-Path $PSScriptRoot "asar-patch.cjs") -Command check -Asar $AsarPath
+if ($CheckResult.ExitCode -notin @(0, 2, 4)) {
+    throw "当前 Nanoleaf 版本不兼容，退出码 $($CheckResult.ExitCode)。 $($CheckResult.Stderr)"
+}
+if ($CheckResult.Stdout) { Write-Host $CheckResult.Stdout.TrimEnd() }
 
 # Reuse settings and the token during an upgrade so existing HA entities keep working.
 $ExistingConfig = $null
@@ -233,6 +242,7 @@ $Files = @(
     "ha-window.css",
     "ha-window.js",
     "asar-patch.cjs",
+    "runtime.ps1",
     "repair.ps1",
     "prepare-update.ps1",
     "resume-after-update.ps1",
@@ -301,20 +311,11 @@ New-NetFirewallRule `
     -RemoteAddress $HaIp `
     -Profile Any | Out-Null
 
-try {
-    $PreviousRunAsNode = $env:ELECTRON_RUN_AS_NODE
-    $env:ELECTRON_RUN_AS_NODE = "1"
-    & $NanoleafExe (Join-Path $InstallDir "asar-patch.cjs") patch $AsarPath
-    if ($LASTEXITCODE -ne 0) { throw "app.asar 补丁失败，退出码 $LASTEXITCODE" }
-}
-finally {
-    if ($null -eq $PreviousRunAsNode) {
-        Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
-    }
-    else {
-        $env:ELECTRON_RUN_AS_NODE = $PreviousRunAsNode
-    }
-}
+$Result = Invoke-NhaPatcher -Exe $NanoleafExe `
+    -Patcher (Join-Path $InstallDir "asar-patch.cjs") -Command patch -Asar $AsarPath
+if ($Result.Stdout) { Write-Host $Result.Stdout.TrimEnd() }
+if ($Result.Stderr) { Write-Host $Result.Stderr.TrimEnd() }
+if ($Result.ExitCode -ne 0) { throw "app.asar 补丁失败，退出码 $($Result.ExitCode)" }
 
 $CurrentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $Action = New-ScheduledTaskAction `

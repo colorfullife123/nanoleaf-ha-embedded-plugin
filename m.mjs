@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PLUGIN_VERSION = "1.1.4";
+const PLUGIN_VERSION = "1.1.5";
 const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(PLUGIN_DIR, "config.json");
 const LOG_PATH = path.join(PLUGIN_DIR, "plugin.log");

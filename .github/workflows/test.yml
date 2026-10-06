@@ -16,6 +16,9 @@ jobs:
         with:
           node-version: 24
       - run: npm test
+      - name: Test GUI helper in Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\test-runtime.ps1
       - name: Parse PowerShell scripts
         shell: pwsh
         run: |

@@ -7,6 +7,7 @@ $LogPath = Join-Path $InstallDir "repair.log"
 $NanoleafExe = "C:\Program Files\Nanoleaf Desktop\Nanoleaf Desktop.exe"
 $AsarPath = "C:\Program Files\Nanoleaf Desktop\resources\app.asar"
 $Patcher = Join-Path $InstallDir "asar-patch.cjs"
+. (Join-Path $PSScriptRoot "runtime.ps1")
 
 function Write-RepairLog([string]$Message) {
     Add-Content $LogPath "$(Get-Date -Format o) $Message" -Encoding UTF8
@@ -29,20 +30,8 @@ try {
         exit 0
     }
 
-    $PreviousRunAsNode = $env:ELECTRON_RUN_AS_NODE
-    try {
-        $env:ELECTRON_RUN_AS_NODE = "1"
-        & $NanoleafExe $Patcher check $AsarPath *> $null
-        $CheckCode = $LASTEXITCODE
-    }
-    finally {
-        if ($null -eq $PreviousRunAsNode) {
-            Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
-        }
-        else {
-            $env:ELECTRON_RUN_AS_NODE = $PreviousRunAsNode
-        }
-    }
+    $Result = Invoke-NhaPatcher -Exe $NanoleafExe -Patcher $Patcher -Command check -Asar $AsarPath
+    $CheckCode = $Result.ExitCode
 
     if ($CheckCode -eq 0) {
         Write-RepairLog "Plugin patch is already active."
@@ -57,20 +46,10 @@ try {
         Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
 
-    try {
-        $PreviousRunAsNode = $env:ELECTRON_RUN_AS_NODE
-        $env:ELECTRON_RUN_AS_NODE = "1"
-        & $NanoleafExe $Patcher patch $AsarPath | ForEach-Object { Write-RepairLog $_ }
-        if ($LASTEXITCODE -ne 0) { throw "Patch command failed with exit code $LASTEXITCODE" }
-    }
-    finally {
-        if ($null -eq $PreviousRunAsNode) {
-            Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
-        }
-        else {
-            $env:ELECTRON_RUN_AS_NODE = $PreviousRunAsNode
-        }
-    }
+    $Result = Invoke-NhaPatcher -Exe $NanoleafExe -Patcher $Patcher -Command patch -Asar $AsarPath
+    if ($Result.Stdout) { Write-RepairLog $Result.Stdout.TrimEnd() }
+    if ($Result.Stderr) { Write-RepairLog $Result.Stderr.TrimEnd() }
+    if ($Result.ExitCode -ne 0) { throw "Patch command failed with exit code $($Result.ExitCode)" }
 
     Start-Process $NanoleafExe -ArgumentList "--hidden"
     Write-RepairLog "Plugin patch restored after an app update; Nanoleaf started hidden."

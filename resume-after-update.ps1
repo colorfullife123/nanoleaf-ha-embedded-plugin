@@ -7,6 +7,7 @@ $AsarPath = "C:\Program Files\Nanoleaf Desktop\resources\app.asar"
 $InstallDir = "C:\ProgramData\NHA"
 $Patcher = Join-Path $InstallDir "asar-patch.cjs"
 $TaskName = "Nanoleaf HA Plugin Repair"
+. (Join-Path $PSScriptRoot "runtime.ps1")
 
 $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $Principal = New-Object Security.Principal.WindowsPrincipal($Identity)
@@ -20,20 +21,10 @@ Get-Process "Nanoleaf Desktop" -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 
-try {
-    $PreviousRunAsNode = $env:ELECTRON_RUN_AS_NODE
-    $env:ELECTRON_RUN_AS_NODE = "1"
-    & $NanoleafExe $Patcher patch $AsarPath
-    if ($LASTEXITCODE -ne 0) { throw "补丁不兼容当前版本，退出码 $LASTEXITCODE" }
-}
-finally {
-    if ($null -eq $PreviousRunAsNode) {
-        Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
-    }
-    else {
-        $env:ELECTRON_RUN_AS_NODE = $PreviousRunAsNode
-    }
-}
+$Result = Invoke-NhaPatcher -Exe $NanoleafExe -Patcher $Patcher -Command patch -Asar $AsarPath
+if ($Result.Stdout) { Write-Host $Result.Stdout.TrimEnd() }
+if ($Result.Stderr) { Write-Host $Result.Stderr.TrimEnd() }
+if ($Result.ExitCode -ne 0) { throw "补丁不兼容当前版本，退出码 $($Result.ExitCode)" }
 
 Enable-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null
 Start-Process $NanoleafExe

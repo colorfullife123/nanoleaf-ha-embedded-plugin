@@ -18,17 +18,19 @@
 
 ## 兼容范围
 
-当前版本：**1.1.4**
+当前版本：**1.1.5**
 
 | 项目 | 范围 |
 | --- | --- |
 | 操作系统 | Windows 10/11 x64 |
-| Nanoleaf Desktop | 已在 3.0.0 上验证 |
+| Nanoleaf Desktop | 3.0.0；3.0.1 的精确兼容标记已依据本机诊断适配，两版本通过合成 ASAR 测试 |
 | 设备 | Pegboard Desk Dock，USB `VID_37FA&PID_8201` |
 | 设备数量 | 1–2 块 |
 | Home Assistant | 使用 `configuration.yaml` 的 REST 与 Template 集成 |
 
 Nanoleaf Desktop 没有公开插件接口。官方更新可能改变内部代码；补丁找不到精确兼容标记时会停止，不会尝试模糊修改未知版本。
+
+3.0.1 的完整界面、USB 控制及托盘退出仍需安装后在真实 Windows 设备上验证；测试不会模拟原厂硬件驱动。
 
 ## 安装
 
@@ -90,6 +92,19 @@ Authorization: Bearer <本机生成的密钥>
 ```
 
 ## 官方更新
+
+### 已升级到 Desktop 3.0.1，但 HA 按钮消失
+
+旧插件 1.1.4 的三个兼容标记不匹配 3.0.1。下载插件 1.1.5，解压后在该目录执行：
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1
+```
+
+安装器会从已安装配置复用 HAOS/Windows IP、设备 ID、名称和 Bearer 密钥。已有 HA YAML 无需因这次兼容修复而重新生成。3.0.1 会单独备份；还原时会校验备份版本和哈希，不会把 3.0.0 备份复制到 3.0.1。
+
+### 下一次官方更新
 
 官方更新会替换 `app.asar`。更新前：
 

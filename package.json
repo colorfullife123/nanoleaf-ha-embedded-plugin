@@ -1,6 +1,6 @@
 {
   "name": "nanoleaf-ha-embedded-plugin",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "private": true,
   "description": "Unofficial embedded Home Assistant bridge for USB Nanoleaf Pegboard Desk Dock devices on Windows",
   "license": "MIT",

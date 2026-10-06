@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.5 — 2026-10-06
+
+- 根据 Desktop 3.0.1 的本机诊断增加独立的入口、退出和清理精确兼容规则，保留 3.0.0 与旧插件升级支持；未知版本继续拒绝修改。
+- 使用共享 .NET 进程执行器等待 Electron GUI 可执行文件并读取可靠退出码，修复安装/恢复/修复/还原时空退出码的问题。
+- 安装器在修改配置前先检查兼容性；为新官方版本单独备份，备份版本与哈希检查在还原写入前执行。
+- 扩展合成 ASAR 测试：双版本往返、清理函数绑定、幂等安装、旧插件升级、官方更新迁移、无效标记及备份保护。
+- 添加 Windows PowerShell 5.1 GUI 进程测试。真实 3.0.1 界面、USB 与退出验证待设备安装完成。
+
 ## 1.1.4 — 2026-10-03
 
 - Published a generic installer with automatic Pegboard USB and Windows IPv4 discovery.
