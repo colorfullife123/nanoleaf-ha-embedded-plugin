@@ -81,15 +81,18 @@ exit 4
         -Argument (('//B //Nologo "{0}" --repair') -f (Join-Path $TempDir 'startup.vbs'))
     $User = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     $Principal = New-ScheduledTaskPrincipal -UserId $User -LogonType S4U -RunLevel Highest
-    # Replacing a 1.1.6 task must remove its old triggers, not just add a new
-    # action while keeping the minute timer.
+    # Migrate a 1.1.6 task using the installer's unregister/recreate sequence.
     $OldTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddHours(1) `
         -RepetitionInterval (New-TimeSpan -Minutes 1)
     Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $OldTrigger -Principal $Principal -Force | Out-Null
     $TaskRegistered = $true
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
     Register-ScheduledTask -TaskName $TaskName -Action $Action -Principal $Principal -Force | Out-Null
     $TaskRegistered = $true
-    Assert-Test (@((Get-ScheduledTask -TaskName $TaskName).Triggers).Count -eq 0) 'Task still has scheduled triggers'
+    $Triggers = @((Get-ScheduledTask -TaskName $TaskName).Triggers | Where-Object { $_ })
+    Assert-Test ($Triggers.Count -eq 0) 'Task still has scheduled triggers'
+    $TaskXml = [xml](Export-ScheduledTask -TaskName $TaskName)
+    Assert-Test ($TaskXml.SelectNodes("/*[local-name()='Task']/*[local-name()='Triggers']/*").Count -eq 0) 'Task XML still has triggers'
     Assert-Test ((Invoke-NhaStartupCheck -TaskName $TaskName -TimeoutSeconds 30) -eq 4) 'Task exit code was not propagated'
 
     @'

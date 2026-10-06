@@ -52,7 +52,7 @@ if (Test-Path (Join-Path $InstallDir "repair.log")) {
 Write-Host "===== Scheduled tasks ====="
 Get-ScheduledTask -ErrorAction SilentlyContinue |
     Where-Object { $_.TaskName -eq "Nanoleaf HA Plugin Repair" } |
-    Select-Object TaskName, State, @{Name='TriggerCount'; Expression={ @($_.Triggers).Count }} |
+    Select-Object TaskName, State, @{Name='TriggerCount'; Expression={ @($_.Triggers | Where-Object { $_ }).Count }} |
     Format-Table -AutoSize
 
 if (Test-Path (Join-Path $InstallDir "launch.log")) {

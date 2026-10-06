@@ -218,6 +218,7 @@ if (-not $DeviceModel) { $DeviceModel = "NL82K1" }
 Stop-ScheduledTask -TaskName $OldTask -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName $OldTask -Confirm:$false -ErrorAction SilentlyContinue
 Stop-ScheduledTask -TaskName $RepairTask -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName $RepairTask -Confirm:$false -ErrorAction SilentlyContinue
 Stop-ScheduledTask -TaskName $LegacyExitCleanupTask -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName $LegacyExitCleanupTask -Confirm:$false -ErrorAction SilentlyContinue
 
