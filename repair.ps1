@@ -1,79 +1,132 @@
-﻿[CmdletBinding()]
-param()
+[CmdletBinding()]
+param(
+    [string]$InstallDir = 'C:\ProgramData\NHA',
+    [string]$NanoleafExe = 'C:\Program Files\Nanoleaf Desktop\Nanoleaf Desktop.exe',
+    [string]$AsarPath = 'C:\Program Files\Nanoleaf Desktop\resources\app.asar',
+    [ValidateRange(0, 30)][int]$UpdaterWaitSeconds = 10,
+    [ValidateRange(0, 5)][int]$StableSeconds = 2
+)
 
-$ErrorActionPreference = "Stop"
-$InstallDir = "C:\ProgramData\NHA"
-$LogPath = Join-Path $InstallDir "repair.log"
-$NanoleafExe = "C:\Program Files\Nanoleaf Desktop\Nanoleaf Desktop.exe"
-$AsarPath = "C:\Program Files\Nanoleaf Desktop\resources\app.asar"
-$Patcher = Join-Path $InstallDir "asar-patch.cjs"
+$ErrorActionPreference = 'Stop'
+$LogPath = Join-Path $InstallDir 'repair.log'
+$StatePath = Join-Path $InstallDir 'repair-state.json'
+$Patcher = Join-Path $InstallDir 'asar-patch.cjs'
+. (Join-Path $PSScriptRoot 'runtime.ps1')
 
 function Write-RepairLog([string]$Message) {
-    Add-Content $LogPath "$(Get-Date -Format o) $Message" -Encoding UTF8
+    if ((Test-Path $LogPath) -and (Get-Item $LogPath).Length -gt 1048576) {
+        Move-Item -LiteralPath $LogPath -Destination ($LogPath + '.1') -Force
+    }
+    Add-Content -LiteralPath $LogPath -Value "$(Get-Date -Format o) $Message" -Encoding UTF8
+}
+
+function Get-ArchiveStamp {
+    $Item = Get-Item -LiteralPath $AsarPath
+    return "$($Item.Length):$($Item.LastWriteTimeUtc.Ticks)"
+}
+
+function Save-RepairState([string]$Status, [string]$Stamp, [bool]$UpdaterActive = $false) {
+    $Next = [ordered]@{
+        pluginVersion = $PluginVersion
+        status = $Status
+        fingerprint = $Stamp
+        observedAtUtc = [DateTime]::UtcNow.ToString('o')
+        updaterActive = $UpdaterActive
+    }
+    $Next | ConvertTo-Json | Set-Content -LiteralPath ($StatePath + '.tmp') -Encoding UTF8
+    Move-Item -LiteralPath ($StatePath + '.tmp') -Destination $StatePath -Force
+}
+
+function Get-NanoleafUpdater {
+    return Get-CimInstance Win32_Process -ErrorAction Stop |
+        Where-Object {
+            $_.CommandLine -and
+            ($_.CommandLine -match 'nanoleaf-updater' -or $_.CommandLine -match 'Nanoleaf.*Update')
+        } | Select-Object -First 1
 }
 
 try {
-    if (-not (Test-Path $NanoleafExe) -or -not (Test-Path $AsarPath) -or -not (Test-Path $Patcher)) {
-        Write-RepairLog "Required files are missing; skipped."
-        exit 1
+    foreach ($FilePath in @($NanoleafExe, $AsarPath, $Patcher, (Join-Path $InstallDir 'VERSION'))) {
+        if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+            Write-RepairLog 'Required files are missing; startup check deferred.'
+            exit 3
+        }
+    }
+    $PluginVersion = (Get-Content -LiteralPath (Join-Path $InstallDir 'VERSION') -Raw).Trim()
+    $Stamp = Get-ArchiveStamp
+    $State = $null
+    if (Test-Path -LiteralPath $StatePath) {
+        try { $State = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json } catch { }
+    }
+    $SameArchive = $State -and $State.pluginVersion -eq $PluginVersion -and $State.fingerprint -eq $Stamp
+    $UpdaterDeadline = [DateTime]::UtcNow.AddSeconds($UpdaterWaitSeconds)
+    while (Get-NanoleafUpdater) {
+        if ([DateTime]::UtcNow -ge $UpdaterDeadline) {
+            if (-not $SameArchive -or -not $State.updaterActive) {
+                Write-RepairLog 'Nanoleaf updater is active; startup check deferred.'
+            }
+            Save-RepairState 'pending' $Stamp $true
+            exit 3
+        }
+        Start-Sleep -Seconds 1
     }
 
-    $Updater = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object {
-            $_.CommandLine -and
-            ($_.CommandLine -match "nanoleaf-updater" -or $_.CommandLine -match "Nanoleaf.*Update")
-        } |
-        Select-Object -First 1
-    if ($Updater) {
-        Write-RepairLog "Nanoleaf updater is active; skipped."
+    if ($SameArchive -and $State.status -in @('active', 'unsupported')) {
+        # No node helper, restart, or repeated log message for an unchanged file.
         exit 0
     }
 
-    $PreviousRunAsNode = $env:ELECTRON_RUN_AS_NODE
-    try {
-        $env:ELECTRON_RUN_AS_NODE = "1"
-        & $NanoleafExe $Patcher check $AsarPath *> $null
-        $CheckCode = $LASTEXITCODE
-    }
-    finally {
-        if ($null -eq $PreviousRunAsNode) {
-            Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
-        }
-        else {
-            $env:ELECTRON_RUN_AS_NODE = $PreviousRunAsNode
+    # An installed, verified patch can be cached immediately after installation.
+    $PatchStatePath = Join-Path $InstallDir 'patch-state.json'
+    if (Test-Path -LiteralPath $PatchStatePath) {
+        $PatchState = $null
+        try { $PatchState = Get-Content -LiteralPath $PatchStatePath -Raw | ConvertFrom-Json } catch { }
+        if ($PatchState -and $PatchState.active -and $PatchState.afterHash -and
+            (Get-FileHash -LiteralPath $AsarPath -Algorithm SHA256).Hash -eq $PatchState.afterHash) {
+            Save-RepairState 'active' $Stamp
+            exit 0
         }
     }
 
-    if ($CheckCode -eq 0) {
-        Write-RepairLog "Plugin patch is already active."
+    # Both observations belong to this launch request; no repeated task is
+    # needed. Leave changing updater files untouched and ask for a later launch.
+    if ($StableSeconds) { Start-Sleep -Seconds $StableSeconds }
+    if ((Get-ArchiveStamp) -ne $Stamp) {
+        Save-RepairState 'pending' (Get-ArchiveStamp)
+        Write-RepairLog 'Archive is changing; startup check deferred.'
+        exit 3
+    }
+
+    $Result = Invoke-NhaPatcher -Exe $NanoleafExe -Patcher $Patcher -Command check -Asar $AsarPath
+    if ($Result.ExitCode -eq 0) {
+        Save-RepairState 'active' $Stamp
         exit 0
     }
-    if ($CheckCode -notin @(2, 4)) {
-        Write-RepairLog "Current Nanoleaf version is incompatible; check exit code $CheckCode."
-        exit $CheckCode
+    if ($Result.ExitCode -notin @(2, 4)) {
+        Save-RepairState 'unsupported' $Stamp
+        Write-RepairLog "Current Nanoleaf build needs a compatible plugin; official app left unchanged. $($Result.Stderr.TrimEnd())"
+        exit 0
+    }
+    if ((Get-ArchiveStamp) -ne $Stamp -or (Get-NanoleafUpdater)) {
+        Save-RepairState 'pending' (Get-ArchiveStamp)
+        exit 3
     }
 
-    Get-Process "Nanoleaf Desktop" -ErrorAction SilentlyContinue |
-        Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
-
-    try {
-        $PreviousRunAsNode = $env:ELECTRON_RUN_AS_NODE
-        $env:ELECTRON_RUN_AS_NODE = "1"
-        & $NanoleafExe $Patcher patch $AsarPath | ForEach-Object { Write-RepairLog $_ }
-        if ($LASTEXITCODE -ne 0) { throw "Patch command failed with exit code $LASTEXITCODE" }
+    $Running = @(Get-Process 'Nanoleaf Desktop' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -eq $NanoleafExe })
+    if ($Running.Count) {
+        Save-RepairState 'pending' $Stamp
+        Write-RepairLog 'Nanoleaf is already running; close it before the next startup check.'
+        exit 0
     }
-    finally {
-        if ($null -eq $PreviousRunAsNode) {
-            Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
-        }
-        else {
-            $env:ELECTRON_RUN_AS_NODE = $PreviousRunAsNode
-        }
-    }
+    if ((Get-ArchiveStamp) -ne $Stamp) { throw 'Archive changed again; repair postponed.' }
 
-    Start-Process $NanoleafExe -ArgumentList "--hidden"
-    Write-RepairLog "Plugin patch restored after an app update; Nanoleaf started hidden."
+    $Result = Invoke-NhaPatcher -Exe $NanoleafExe -Patcher $Patcher -Command patch -Asar $AsarPath
+    if ($Result.Stdout) { Write-RepairLog $Result.Stdout.TrimEnd() }
+    if ($Result.Stderr) { Write-RepairLog $Result.Stderr.TrimEnd() }
+    if ($Result.ExitCode -ne 0) { throw "Patch command failed with exit code $($Result.ExitCode)" }
+    Save-RepairState 'active' (Get-ArchiveStamp)
+    Write-RepairLog 'Startup repair completed; launcher may now open Nanoleaf.'
 }
 catch {
     Write-RepairLog "ERROR: $($_.Exception.Message)"

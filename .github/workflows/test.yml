@@ -16,11 +16,20 @@ jobs:
         with:
           node-version: 24
       - run: npm test
+      - name: Test GUI helper in Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\test-runtime.ps1
+      - name: Test startup update recovery in Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\test-repair.ps1
+      - name: Test hidden startup and on-demand task in Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\test-startup.ps1
       - name: Parse PowerShell scripts
         shell: pwsh
         run: |
           $Failed = $false
-          Get-ChildItem -Path . -Filter *.ps1 | ForEach-Object {
+          Get-ChildItem -Path . -Filter *.ps1 -Recurse | ForEach-Object {
             $Tokens = $null
             $Errors = $null
             [void][Management.Automation.Language.Parser]::ParseFile(

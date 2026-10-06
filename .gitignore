@@ -1,6 +1,8 @@
 # Runtime configuration and credentials
 config.json
 patch-state.json
+repair-state.json
+repair-state.json.tmp
 *.log
 *.log.1
 

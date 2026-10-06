@@ -20,6 +20,10 @@ const required = [
   "prepare-update.ps1",
   "repair.ps1",
   "resume-after-update.ps1",
+  "runtime.ps1",
+  "startup.vbs",
+  "launch.ps1",
+  "startup-runtime.ps1",
   "status.ps1",
   "uninstall.ps1",
 ];
@@ -28,8 +32,8 @@ for (const relativePath of required) {
   assert(fs.existsSync(path.join(root, relativePath)), `Missing ${relativePath}`);
 }
 
-assert.equal(fs.readFileSync(path.join(root, "VERSION"), "utf8").trim(), "1.1.4");
-assert.equal(require(path.join(root, "package.json")).version, "1.1.4");
+assert.equal(fs.readFileSync(path.join(root, "VERSION"), "utf8").trim(), "1.1.7");
+assert.equal(require(path.join(root, "package.json")).version, "1.1.7");
 
 for (const relativePath of ["m.mjs", "ha-window.js", "ha-preload.cjs", "asar-patch.cjs"]) {
   const result = spawnSync(process.execPath, ["--check", path.join(root, relativePath)], {

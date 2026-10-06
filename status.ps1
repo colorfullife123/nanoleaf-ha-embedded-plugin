@@ -7,6 +7,7 @@ $AsarPath = "C:\Program Files\Nanoleaf Desktop\resources\app.asar"
 $Patcher = Join-Path $InstallDir "asar-patch.cjs"
 $ConfigPath = Join-Path $InstallDir "config.json"
 $BridgePort = 17654
+. (Join-Path $PSScriptRoot "runtime.ps1")
 
 Write-Host "===== Nanoleaf HA Embedded Plugin =====" -ForegroundColor Cyan
 if (Test-Path $ConfigPath) {
@@ -26,20 +27,10 @@ if (Test-Path $ConfigPath) {
 }
 
 if ((Test-Path $NanoleafExe) -and (Test-Path $Patcher) -and (Test-Path $AsarPath)) {
-    try {
-        $PreviousRunAsNode = $env:ELECTRON_RUN_AS_NODE
-        $env:ELECTRON_RUN_AS_NODE = "1"
-        & $NanoleafExe $Patcher check $AsarPath
-        Write-Host "PatchExit: $LASTEXITCODE"
-    }
-    finally {
-        if ($null -eq $PreviousRunAsNode) {
-            Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
-        }
-        else {
-            $env:ELECTRON_RUN_AS_NODE = $PreviousRunAsNode
-        }
-    }
+    $Result = Invoke-NhaPatcher -Exe $NanoleafExe -Patcher $Patcher -Command check -Asar $AsarPath
+    if ($Result.Stdout) { Write-Host $Result.Stdout.TrimEnd() }
+    if ($Result.Stderr) { Write-Host $Result.Stderr.TrimEnd() }
+    Write-Host "PatchExit: $($Result.ExitCode)"
 }
 
 Write-Host ""
@@ -48,11 +39,25 @@ Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
     Select-Object LocalAddress, LocalPort, OwningProcess |
     Format-Table -AutoSize
 
+if (Test-Path (Join-Path $InstallDir "repair-state.json")) {
+    Write-Host "===== Startup repair ====="
+    $RepairState = Get-Content (Join-Path $InstallDir "repair-state.json") -Raw | ConvertFrom-Json
+    Write-Host "Status   : $($RepairState.status)"
+    Write-Host "Observed : $($RepairState.observedAtUtc)"
+}
+if (Test-Path (Join-Path $InstallDir "repair.log")) {
+    Get-Content (Join-Path $InstallDir "repair.log") -Tail 10
+}
+
 Write-Host "===== Scheduled tasks ====="
 Get-ScheduledTask -ErrorAction SilentlyContinue |
     Where-Object { $_.TaskName -eq "Nanoleaf HA Plugin Repair" } |
-    Select-Object TaskName, State |
+    Select-Object TaskName, State, @{Name='TriggerCount'; Expression={ @($_.Triggers | Where-Object { $_ }).Count }} |
     Format-Table -AutoSize
+
+if (Test-Path (Join-Path $InstallDir "launch.log")) {
+    Get-Content (Join-Path $InstallDir "launch.log") -Tail 10
+}
 
 if (Test-Path (Join-Path $InstallDir "plugin.log")) {
     Write-Host "===== plugin.log (last 15 lines) ====="

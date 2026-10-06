@@ -99,12 +99,23 @@ $RepairTask = "Nanoleaf HA Plugin Repair"
 $LegacyExitCleanupTask = "Nanoleaf HA Exit Cleanup"
 $FirewallRule = "Nanoleaf HA Embedded Plugin"
 $OldTask = "Nanoleaf HA Gateway"
+$ScriptHost = Join-Path $env:SystemRoot 'System32\wscript.exe'
+. (Join-Path $PSScriptRoot "runtime.ps1")
 
 if (-not (Test-Path $NanoleafExe) -or -not (Test-Path $AsarPath)) {
     throw "未找到 Nanoleaf Desktop 3.x，请先安装官方桌面端。"
 }
+if (-not (Test-Path -LiteralPath $ScriptHost)) { throw 'Windows Script Host (wscript.exe) is required for hidden startup.' }
 
 Write-Host "正在安装 Nanoleaf HA 嵌入式插件..." -ForegroundColor Cyan
+
+# Validate the new official build before changing the installed plugin/config.
+$CheckResult = Invoke-NhaPatcher -Exe $NanoleafExe `
+    -Patcher (Join-Path $PSScriptRoot "asar-patch.cjs") -Command check -Asar $AsarPath
+if ($CheckResult.ExitCode -notin @(0, 2, 4)) {
+    throw "当前 Nanoleaf 版本不兼容，退出码 $($CheckResult.ExitCode)。 $($CheckResult.Stderr)"
+}
+if ($CheckResult.Stdout) { Write-Host $CheckResult.Stdout.TrimEnd() }
 
 # Reuse settings and the token during an upgrade so existing HA entities keep working.
 $ExistingConfig = $null
@@ -207,6 +218,7 @@ if (-not $DeviceModel) { $DeviceModel = "NL82K1" }
 Stop-ScheduledTask -TaskName $OldTask -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName $OldTask -Confirm:$false -ErrorAction SilentlyContinue
 Stop-ScheduledTask -TaskName $RepairTask -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName $RepairTask -Confirm:$false -ErrorAction SilentlyContinue
 Stop-ScheduledTask -TaskName $LegacyExitCleanupTask -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName $LegacyExitCleanupTask -Confirm:$false -ErrorAction SilentlyContinue
 
@@ -233,7 +245,11 @@ $Files = @(
     "ha-window.css",
     "ha-window.js",
     "asar-patch.cjs",
+    "runtime.ps1",
     "repair.ps1",
+    "startup.vbs",
+    "launch.ps1",
+    "startup-runtime.ps1",
     "prepare-update.ps1",
     "resume-after-update.ps1",
     "uninstall.ps1",
@@ -301,27 +317,16 @@ New-NetFirewallRule `
     -RemoteAddress $HaIp `
     -Profile Any | Out-Null
 
-try {
-    $PreviousRunAsNode = $env:ELECTRON_RUN_AS_NODE
-    $env:ELECTRON_RUN_AS_NODE = "1"
-    & $NanoleafExe (Join-Path $InstallDir "asar-patch.cjs") patch $AsarPath
-    if ($LASTEXITCODE -ne 0) { throw "app.asar 补丁失败，退出码 $LASTEXITCODE" }
-}
-finally {
-    if ($null -eq $PreviousRunAsNode) {
-        Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
-    }
-    else {
-        $env:ELECTRON_RUN_AS_NODE = $PreviousRunAsNode
-    }
-}
+$Result = Invoke-NhaPatcher -Exe $NanoleafExe `
+    -Patcher (Join-Path $InstallDir "asar-patch.cjs") -Command patch -Asar $AsarPath
+if ($Result.Stdout) { Write-Host $Result.Stdout.TrimEnd() }
+if ($Result.Stderr) { Write-Host $Result.Stderr.TrimEnd() }
+if ($Result.ExitCode -ne 0) { throw "app.asar 补丁失败，退出码 $($Result.ExitCode)" }
 
 $CurrentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $Action = New-ScheduledTaskAction `
-    -Execute "powershell.exe" `
-    -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$InstallDir\repair.ps1`""
-$Trigger = New-ScheduledTaskTrigger -AtLogOn -User $CurrentUser
-$Trigger.Delay = "PT45S"
+    -Execute $ScriptHost `
+    -Argument "//B //Nologo `"$InstallDir\startup.vbs`" --repair"
 $Principal = New-ScheduledTaskPrincipal `
     -UserId $CurrentUser `
     -LogonType Interactive `
@@ -335,10 +340,26 @@ $Settings = New-ScheduledTaskSettingsSet `
 Register-ScheduledTask `
     -TaskName $RepairTask `
     -Action $Action `
-    -Trigger $Trigger `
     -Principal $Principal `
     -Settings $Settings `
     -Force | Out-Null
+
+# Explicit launch shortcuts survive official updates and do not need to modify
+# the vendor executable or existing pinned shortcuts. The repair task has no
+# triggers; launch.ps1 runs it on demand before opening the app unelevated.
+$Shell = New-Object -ComObject WScript.Shell
+foreach ($Folder in @(
+    [Environment]::GetFolderPath('Desktop'),
+    [Environment]::GetFolderPath('Programs')
+)) {
+    $Shortcut = $Shell.CreateShortcut((Join-Path $Folder 'Nanoleaf Desktop (HA).lnk'))
+    $Shortcut.TargetPath = $ScriptHost
+    $Shortcut.Arguments = "//B //Nologo `"$InstallDir\startup.vbs`""
+    $Shortcut.WorkingDirectory = $InstallDir
+    $Shortcut.IconLocation = "$NanoleafExe,0"
+    $Shortcut.Description = '启动前检查 HA 插件，再打开 Nanoleaf Desktop'
+    $Shortcut.Save()
+}
 
 Start-Process $NanoleafExe
 
@@ -364,7 +385,9 @@ Write-Host "设备 J     : $DeviceJId"
 if ($DeviceKId) { Write-Host "设备 K     : $DeviceKId" }
 Write-Host "网关地址   : http://${PcIp}:$Port"
 Write-Host "应用入口   : Nanoleaf 主窗口左下角的 HA 按钮"
+Write-Host "启动检查   : 使用桌面/开始菜单 Nanoleaf Desktop (HA)，无定时检查"
 Write-Host "登录启动   : 已启用 --hidden（只进入托盘）"
+Write-Host "自动更新   : 下次通过 HA 启动入口打开时检查已兼容版本"
 Write-Host "退出方式   : 兼容清理后由 Nanoleaf 主进程自终止（无外部强制任务）"
 Write-Host "网关健康   : $HealthOk"
 if (-not $HealthOk) {

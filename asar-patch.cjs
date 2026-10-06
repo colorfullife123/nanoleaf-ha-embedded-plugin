@@ -7,6 +7,7 @@ process.noAsar = true;
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const PLUGIN_VERSION = "1.1.7";
 
 function paddedReplacement(target, replacement) {
   const remaining = Buffer.byteLength(target) - Buffer.byteLength(replacement);
@@ -50,7 +51,7 @@ const BEFORE_QUIT_REPLACEMENT_1_1_0 = paddedReplacement(
   'xm.on("before-quit",t=>{yMt||(t.preventDefault(),Q$=!0,Wr&&!Wr.isDestroyed()&&(xm.dock?.hide(),Wr.hide(),Wr.webContents.send("cleanup")),vMt())});'
 );
 
-const PATCHES = Object.freeze([
+const PATCHES_3_0_0 = Object.freeze([
   Object.freeze({
     name: "entry",
     target: ENTRY_TARGET,
@@ -74,6 +75,40 @@ const PATCHES = Object.freeze([
     legacyReplacements: Object.freeze([BEFORE_QUIT_REPLACEMENT_1_1_0]),
   }),
 ]);
+
+// Exact markers taken from the 3.0.1 diagnostic. Unknown builds remain blocked.
+const ENTRY_TARGET_3_0_1 = 'console.log("Running app version",tt.pkg.version);';
+const CLEANUP_TARGET_3_0_1 =
+  'async function TMt(){vxe(),await Promise.all([ZP(),oJ(),MTe(),CDt(),S$()]),c1.deinit(),Ti.deinit(),wMt=!0,zm.quit()}';
+const BEFORE_QUIT_TARGET_3_0_1 =
+  'zm.on("before-quit",async t=>{wMt||(t.preventDefault(),U$=!0,Wr&&!Wr.isDestroyed()?(zm.dock?.hide(),Wr.hide(),Wr.webContents.send("cleanup")):TMt())});';
+const PATCHES_3_0_1 = Object.freeze([
+  Object.freeze({
+    name: "entry",
+    target: ENTRY_TARGET_3_0_1,
+    replacement: paddedReplacement(ENTRY_TARGET_3_0_1, 'import("file:///C:/ProgramData/NHA/m.mjs");'),
+    legacyReplacements: Object.freeze([]),
+  }),
+  Object.freeze({
+    name: "cleanup",
+    target: CLEANUP_TARGET_3_0_1,
+    replacement: paddedReplacement(
+      CLEANUP_TARGET_3_0_1,
+      'function TMt(){global.__nhaQuit?.([vxe,ZP,oJ,MTe,CDt,S$],[c1.deinit,Ti.deinit])||zm.exit()}'
+    ),
+    legacyReplacements: Object.freeze([]),
+  }),
+  Object.freeze({
+    name: "beforeQuit",
+    target: BEFORE_QUIT_TARGET_3_0_1,
+    replacement: paddedReplacement(
+      BEFORE_QUIT_TARGET_3_0_1,
+      'zm.on("before-quit",t=>{wMt||(t.preventDefault(),U$=!0,TMt(),Wr&&!Wr.isDestroyed()&&(zm.dock?.hide(),Wr.hide(),Wr.webContents.send("cleanup")))});'
+    ),
+    legacyReplacements: Object.freeze([]),
+  }),
+]);
+const PATCH_PROFILES = Object.freeze({ "3.0.0": PATCHES_3_0_0, "3.0.1": PATCHES_3_0_1 });
 
 function fail(message, code = 1) {
   console.error(`[NHA] ${message}`);
@@ -148,6 +183,21 @@ function readArchive(asarPath) {
     const jsonBuffer = headerPickle.subarray(8, 8 + jsonSize);
     const jsonText = jsonBuffer.toString("utf8");
     const header = JSON.parse(jsonText);
+    const packageEntry = header?.files?.["package.json"];
+    if (!packageEntry || packageEntry.unpacked || !Number.isSafeInteger(Number(packageEntry.size)) ||
+        Number(packageEntry.size) <= 0 || Number(packageEntry.size) > 1024 * 1024 ||
+        !Number.isSafeInteger(Number(packageEntry.offset)) || Number(packageEntry.offset) < 0) {
+      throw new Error("A valid packed package.json was not found inside app.asar");
+    }
+    const packageContent = Buffer.alloc(Number(packageEntry.size));
+    if (fs.readSync(descriptor, packageContent, 0, packageContent.length,
+      8 + headerSize + Number(packageEntry.offset)) !== packageContent.length) {
+      throw new Error("package.json is truncated");
+    }
+    const pkg = JSON.parse(packageContent.toString("utf8").replace(/^\uFEFF/, ""));
+    if (String(pkg.main || "").replace(/^\.\//, "") !== "minified/main.js") {
+      throw new Error("Nanoleaf's main entry is not minified/main.js");
+    }
     const entry = header?.files?.minified?.files?.["main.js"];
     if (!entry || entry.unpacked || entry.offset === undefined || !Number.isFinite(Number(entry.size))) {
       throw new Error("minified/main.js was not found inside app.asar");
@@ -165,6 +215,7 @@ function readArchive(asarPath) {
       jsonText,
       contentOffset,
       content,
+      desktopVersion: String(pkg.version || ""),
     };
   } finally {
     fs.closeSync(descriptor);
@@ -173,7 +224,12 @@ function readArchive(asarPath) {
 
 function inspectArchive(asarPath) {
   const archive = readArchive(asarPath);
-  const patches = Object.fromEntries(PATCHES.map((patch) => [
+  const patchDefinitions = Object.hasOwn(PATCH_PROFILES, archive.desktopVersion)
+    ? PATCH_PROFILES[archive.desktopVersion] : null;
+  if (!patchDefinitions) {
+    throw new Error(`Unsupported Nanoleaf Desktop version: ${archive.desktopVersion || "unknown"}; supported: 3.0.0, 3.0.1`);
+  }
+  const patches = Object.fromEntries(patchDefinitions.map((patch) => [
     patch.name,
     {
       ...patch,
@@ -190,6 +246,7 @@ function inspectArchive(asarPath) {
   return {
     ...archive,
     patches,
+    patchDefinitions,
   };
 }
 
@@ -232,15 +289,15 @@ function check(asarPath) {
   const archive = inspectArchive(asarPath);
   const states = Object.values(archive.patches);
   if (states.every(isCurrentPatch)) {
-    console.log("[NHA] Embedded plugin 1.1.4 and compatible self-termination hooks are active.");
+    console.log(`[NHA] Embedded hooks are active for Nanoleaf Desktop ${archive.desktopVersion} (patcher ${PLUGIN_VERSION}).`);
     return 0;
   }
   if (states.every(isOfficialPatch)) {
-    console.log("[NHA] Official app.asar is compatible and not patched.");
+    console.log(`[NHA] Official Nanoleaf Desktop ${archive.desktopVersion} is compatible and not patched.`);
     return 2;
   }
   if (states.every(isRecognizedPatch)) {
-    console.log("[NHA] A compatible previous plugin patch is active; 1.1.4 upgrade is available.");
+    console.log(`[NHA] A compatible previous plugin patch is active; ${PLUGIN_VERSION} upgrade is available.`);
     return 4;
   }
   console.error(
@@ -255,7 +312,8 @@ function check(asarPath) {
 }
 
 function patchArchive(asarPath, pluginDir) {
-  for (const patch of PATCHES) {
+  const archive = inspectArchive(asarPath);
+  for (const patch of archive.patchDefinitions) {
     if (Buffer.byteLength(patch.target) !== Buffer.byteLength(patch.replacement)) {
       throw new Error(`Internal patch length mismatch: ${patch.name}`);
     }
@@ -266,7 +324,6 @@ function patchArchive(asarPath, pluginDir) {
     }
   }
 
-  const archive = inspectArchive(asarPath);
   const states = Object.values(archive.patches);
   if (states.every(isCurrentPatch)) {
     console.log("[NHA] app.asar is already patched.");
@@ -291,6 +348,9 @@ function patchArchive(asarPath, pluginDir) {
       );
     }
     const backupArchive = inspectArchive(backupPath);
+    if (backupArchive.desktopVersion !== archive.desktopVersion) {
+      throw new Error("The official backup belongs to a different Nanoleaf Desktop version");
+    }
     const backupStates = Object.values(backupArchive.patches);
     if (!backupStates.every(isOfficialPatch)) {
       throw new Error("The recorded app.asar backup is not an unmodified compatible archive");
@@ -308,7 +368,8 @@ function patchArchive(asarPath, pluginDir) {
     beforeHash = sha256(fs.readFileSync(asarPath));
   }
 
-  const currentBeforeHash = sha256(fs.readFileSync(asarPath));
+  const currentBeforeBytes = fs.readFileSync(asarPath);
+  const currentBeforeHash = sha256(currentBeforeBytes);
   const nextContent = Buffer.from(archive.content);
   const appliedPatches = [];
   for (const patch of states) {
@@ -357,6 +418,8 @@ function patchArchive(asarPath, pluginDir) {
     writeState(pluginDir, {
       ...previousState,
       active: true,
+      pluginVersion: PLUGIN_VERSION,
+      desktopVersion: archive.desktopVersion,
       patchedAt: new Date().toISOString(),
       asarPath,
       backupPath,
@@ -364,7 +427,7 @@ function patchArchive(asarPath, pluginDir) {
       currentBeforeHash,
       afterHash,
       appliedPatches,
-      patches: PATCHES.map((patch) => ({
+      patches: archive.patchDefinitions.map((patch) => ({
         name: patch.name,
         target: patch.target,
         replacement: patch.replacement.trimEnd(),
@@ -376,17 +439,13 @@ function patchArchive(asarPath, pluginDir) {
     console.log(`[NHA] Patched: ${asarPath}`);
     console.log(`[NHA] Backup:  ${backupPath}`);
   } catch (error) {
-    fs.copyFileSync(backupPath, asarPath);
+    fs.writeFileSync(asarPath, currentBeforeBytes);
     throw error;
   }
 }
 
 function restoreArchive(asarPath, pluginDir) {
   const state = readState(pluginDir);
-  if (!state?.backupPath || !fs.existsSync(state.backupPath)) {
-    throw new Error("No official app.asar backup is available");
-  }
-
   const archive = inspectArchive(asarPath);
   const states = Object.values(archive.patches);
   if (states.every(isOfficialPatch)) {
@@ -402,7 +461,20 @@ function restoreArchive(asarPath, pluginDir) {
   if (!states.every(isRecognizedPatch)) {
     throw new Error("Current app.asar is not a recognized plugin-patched archive");
   }
-
+  if (!state?.backupPath || !fs.existsSync(state.backupPath)) {
+    throw new Error("No official app.asar backup is available");
+  }
+  const backupArchive = inspectArchive(state.backupPath);
+  if (backupArchive.desktopVersion !== archive.desktopVersion) {
+    throw new Error("Refusing to restore a backup from a different Nanoleaf Desktop version");
+  }
+  if (!Object.values(backupArchive.patches).every(isOfficialPatch)) {
+    throw new Error("The backup is not an unmodified compatible archive");
+  }
+  const backupHash = sha256(fs.readFileSync(state.backupPath));
+  if (state.beforeHash && backupHash !== state.beforeHash) {
+    throw new Error("The official backup hash does not match patch-state.json; nothing was overwritten");
+  }
   fs.copyFileSync(state.backupPath, asarPath);
   const restoredHash = sha256(fs.readFileSync(asarPath));
   if (state.beforeHash && restoredHash !== state.beforeHash) {

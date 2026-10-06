@@ -23,7 +23,7 @@ async function main() {
         getVersion: () => "3.0.0-test",
         once: () => {},
         whenReady: () => new Promise(() => {}),
-        setLoginItemSettings: () => {},
+        setLoginItemSettings: (settings) => { globalThis.testLoginSettings = settings; },
         removeAllListeners: () => {},
       };
       export class BrowserWindow {
@@ -40,7 +40,7 @@ async function main() {
     `);
 
     const source = fs.readFileSync(path.join(root, "m.mjs"), "utf8") +
-      "\nexport { loadConfig, saveConfig, selectedDevices, yamlConfig };\n";
+      "\nexport { loadConfig, saveConfig, selectedDevices, yamlConfig, applyAutoStart };\n";
     const modulePath = path.join(temporaryRoot, "m.mjs");
     fs.writeFileSync(modulePath, source);
     const plugin = await import(pathToFileURL(modulePath).href);
@@ -62,6 +62,14 @@ async function main() {
     assert.equal(loaded.version, 2);
     assert.deepEqual(Object.keys(loaded.devices), ["j", "k"]);
     assert.equal(plugin.selectedDevices("all").length, 2);
+
+    plugin.applyAutoStart(true);
+    assert.equal(globalThis.testLoginSettings.openAtLogin, true);
+    assert(globalThis.testLoginSettings.path.endsWith("wscript.exe"));
+    assert.deepEqual(globalThis.testLoginSettings.args, ["//B", "//Nologo", path.join(temporaryRoot, "startup.vbs"), "--hidden"]);
+    plugin.applyAutoStart(false);
+    assert.equal(globalThis.testLoginSettings.openAtLogin, false);
+    delete globalThis.testLoginSettings;
 
     const yaml = plugin.yamlConfig();
     assert(yaml.includes("http://192.0.2.20:17654/device/j"));
