@@ -32,8 +32,8 @@ for (const relativePath of required) {
   assert(fs.existsSync(path.join(root, relativePath)), `Missing ${relativePath}`);
 }
 
-assert.equal(fs.readFileSync(path.join(root, "VERSION"), "utf8").trim(), "1.1.7");
-assert.equal(require(path.join(root, "package.json")).version, "1.1.7");
+assert.equal(fs.readFileSync(path.join(root, "VERSION"), "utf8").trim(), "1.1.8");
+assert.equal(require(path.join(root, "package.json")).version, "1.1.8");
 
 for (const relativePath of ["m.mjs", "ha-window.js", "ha-preload.cjs", "asar-patch.cjs"]) {
   const result = spawnSync(process.execPath, ["--check", path.join(root, relativePath)], {

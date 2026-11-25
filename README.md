@@ -18,12 +18,12 @@
 
 ## 兼容范围
 
-当前版本：**1.1.7**
+当前版本：**1.1.8**
 
 | 项目 | 范围 |
 | --- | --- |
 | 操作系统 | Windows 10/11 x64 |
-| Nanoleaf Desktop | 3.0.0；3.0.1 的精确兼容标记已依据本机诊断适配，两版本通过合成 ASAR 测试 |
+| Nanoleaf Desktop | 3.0.0、3.0.1、3.0.3；精确兼容规则，未知版本停止修改 |
 | 设备 | Pegboard Desk Dock，USB `VID_37FA&PID_8201` |
 | 设备数量 | 1–2 块 |
 | Home Assistant | 使用 `configuration.yaml` 的 REST 与 Template 集成 |
@@ -92,6 +92,21 @@ Authorization: Bearer <本机生成的密钥>
 ```
 
 ## 官方更新
+
+### 已升级到 Desktop 3.0.3，但 HA 按钮消失
+
+插件 1.1.7 的兼容表仅包含 3.0.0/3.0.1。1.1.8 已从官方 Windows 3.0.3 安装包核对入口、退出与清理代码，加入七项并行清理以及在原生库退出前等待动态灯效播放器关闭。
+
+下载 1.1.8 并解压，在解压目录运行：
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1
+```
+
+安装器复用已有网络地址、设备 ID、中文名称和 Bearer 密钥；HA YAML 无需重建。仍然只在 **Nanoleaf Desktop (HA)** 启动入口检查，不增加每分钟任务。新版本会独立备份 3.0.3 官方文件，禁止跨版本还原。
+
+验证范围：已对下载的官方 3.0.3 ASAR 执行补丁检查、等长写入、完整性校验、完整主脚本语法检查、幂等安装和逐字节还原，并扩展三版本合成 ASAR 与清理绑定测试。签名官方安装包和真实 Electron 辅助进程由 Windows CI 验证；HA 按钮、实际 USB 控制及托盘退出仍需本机确认。
 
 ### 已升级到 Desktop 3.0.1，但 HA 按钮消失
 

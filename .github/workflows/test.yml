@@ -25,6 +25,9 @@ jobs:
       - name: Test hidden startup and on-demand task in Windows PowerShell 5.1
         shell: powershell
         run: .\tests\test-startup.ps1
+      - name: Test official Desktop 3.0.3 Electron helper and archive
+        shell: powershell
+        run: .\tests\test-official-desktop.ps1
       - name: Parse PowerShell scripts
         shell: pwsh
         run: |

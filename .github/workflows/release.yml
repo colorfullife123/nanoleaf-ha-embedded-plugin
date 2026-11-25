@@ -90,7 +90,7 @@ jobs:
           changelog = (root / 'CHANGELOG.md').read_text()
           match = re.search(r'^## ' + re.escape(version) + r'[^\n]*\n(.*?)(?=^## |\Z)', changelog, re.M | re.S)
           assert match, 'Current version is missing from CHANGELOG.md'
-          notes = match.group(1).strip() + '\n\n下载下方安装包 ZIP，解压后运行：\n\n```powershell\nSet-ExecutionPolicy -Scope Process Bypass\n.\\install.ps1\n```\n\n首次安装请额外传入 `-HaIp <你的HAOS_IP>`；升级会复用已有配置与密钥。安装包为平铺目录，手动启动请使用安装器创建的 **Nanoleaf Desktop (HA)** 快捷方式；直接运行官方 EXE 会绕过启动检查。\n\n支持 Desktop 3.0.0/3.0.1 的精确兼容规则。Windows PowerShell 5.1 自动化测试已通过；新的启动入口和完整官方更新仍需设备验证。非官方扩展，包中不包含官方程序、个人配置或密钥。\n\nZIP SHA-256：`' + digest + '`\n'
+          notes = match.group(1).strip() + '\n\n下载下方安装包 ZIP，解压后运行：\n\n```powershell\nSet-ExecutionPolicy -Scope Process Bypass\n.\\install.ps1\n```\n\n首次安装请额外传入 `-HaIp <你的HAOS_IP>`；升级会复用已有配置与密钥。安装包为平铺目录，手动启动请使用安装器创建的 **Nanoleaf Desktop (HA)** 快捷方式；直接运行官方 EXE 会绕过启动检查。\n\n支持 Desktop 3.0.0/3.0.1/3.0.3 的精确兼容规则。Windows PowerShell 5.1 自动化测试包含官方 3.0.3 的 Electron 辅助进程验证；实际 USB 控制与托盘退出仍需本机确认。非官方扩展，包中不包含官方程序、个人配置或密钥。\n\nZIP SHA-256：`' + digest + '`\n'
           (out / 'notes.md').write_text(notes)
           print(archive.name, archive.stat().st_size, digest)
           PY
