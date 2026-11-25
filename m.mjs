@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PLUGIN_VERSION = "1.1.7";
+const PLUGIN_VERSION = "1.1.8";
 const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(PLUGIN_DIR, "config.json");
 const LOG_PATH = path.join(PLUGIN_DIR, "plugin.log");
@@ -495,11 +495,22 @@ function runOfficialCleanupStep(step, name) {
   });
 }
 
+function officialCleanupNames() {
+  if (app.getVersion() === "3.0.3") {
+    return {
+      parallel: ["dns-sd", "audio-orchestrator", ...PARALLEL_CLEANUP_NAMES.slice(1)],
+      final: ["motion-players", ...FINAL_CLEANUP_NAMES],
+    };
+  }
+  return { parallel: PARALLEL_CLEANUP_NAMES, final: FINAL_CLEANUP_NAMES };
+}
+
 function normalizeFinalCleanupSteps(value) {
+  const names = officialCleanupNames().final;
   if (Array.isArray(value)) {
     return {
       steps: value,
-      names: FINAL_CLEANUP_NAMES,
+      names,
       compatibility: "array",
     };
   }
@@ -514,7 +525,7 @@ function normalizeFinalCleanupSteps(value) {
     const steps = Array.from(value).filter((step) => typeof step === "function");
     return {
       steps,
-      names: FINAL_CLEANUP_NAMES.slice(0, steps.length),
+      names: names.slice(0, steps.length),
       compatibility: "iterable",
     };
   }
@@ -532,13 +543,14 @@ function runNanoleafOfficialCleanup(parallelSteps, finalSteps = []) {
   officialCleanupPromise = (async () => {
     try {
       const normalizedFinal = normalizeFinalCleanupSteps(finalSteps);
+      const parallelNames = officialCleanupNames().parallel;
       stopPluginResourcesForExit();
       scheduleExitFallback();
       log("Nanoleaf internal cleanup started", {
         rendererGraceMs: RENDERER_CLEANUP_GRACE_MS,
         timeoutMs: OFFICIAL_CLEANUP_TIMEOUT_MS,
         fallbackMs: INTERNAL_EXIT_FALLBACK_MS,
-        parallelSteps: PARALLEL_CLEANUP_NAMES,
+        parallelSteps: parallelNames,
         finalSteps: normalizedFinal.names,
         finalStepCompatibility: normalizedFinal.compatibility,
       });
@@ -550,7 +562,7 @@ function runNanoleafOfficialCleanup(parallelSteps, finalSteps = []) {
         parallelSteps.map((step, index) =>
           runOfficialCleanupStep(
             step,
-            PARALLEL_CLEANUP_NAMES[index] || `parallel-step-${index + 1}`
+            parallelNames[index] || `parallel-step-${index + 1}`
           )
         )
       );

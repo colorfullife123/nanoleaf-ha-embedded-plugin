@@ -7,7 +7,7 @@ process.noAsar = true;
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const PLUGIN_VERSION = "1.1.7";
+const PLUGIN_VERSION = "1.1.8";
 
 function paddedReplacement(target, replacement) {
   const remaining = Buffer.byteLength(target) - Buffer.byteLength(replacement);
@@ -108,7 +108,44 @@ const PATCHES_3_0_1 = Object.freeze([
     legacyReplacements: Object.freeze([]),
   }),
 ]);
-const PATCH_PROFILES = Object.freeze({ "3.0.0": PATCHES_3_0_0, "3.0.1": PATCHES_3_0_1 });
+// Verified against the Windows installer linked by Nanoleaf's official site.
+// 3.0.3 adds audio cleanup and awaits motion players before native deinit.
+const ENTRY_TARGET_3_0_3 = 'console.log("Running app version",He.pkg.version);';
+const CLEANUP_TARGET_3_0_3 =
+  'async function sQt(){jwe(),await Promise.allSettled([ZTt(),b8(),eU(),kve(),wEt(),eJ()]),await uz.closeMotionPlayers(),az.deinit(),Is.deinit(),nQt=!0,EA.quit()}';
+const BEFORE_QUIT_TARGET_3_0_3 =
+  'EA.on("before-quit",async t=>{nQt||(t.preventDefault(),uJ=!0,Vr&&!Vr.isDestroyed()?(EA.dock?.hide(),Vr.hide(),Vr.webContents.send("cleanup")):sQt())});';
+const PATCHES_3_0_3 = Object.freeze([
+  Object.freeze({
+    name: "entry",
+    target: ENTRY_TARGET_3_0_3,
+    replacement: paddedReplacement(ENTRY_TARGET_3_0_3, 'import("file:///C:/ProgramData/NHA/m.mjs");'),
+    legacyReplacements: Object.freeze([]),
+  }),
+  Object.freeze({
+    name: "cleanup",
+    target: CLEANUP_TARGET_3_0_3,
+    replacement: paddedReplacement(
+      CLEANUP_TARGET_3_0_3,
+      'function sQt(){global.__nhaQuit?.([jwe,ZTt,b8,eU,kve,wEt,eJ],[()=>uz.closeMotionPlayers(),()=>az.deinit(),()=>Is.deinit()])||EA.exit()}'
+    ),
+    legacyReplacements: Object.freeze([]),
+  }),
+  Object.freeze({
+    name: "beforeQuit",
+    target: BEFORE_QUIT_TARGET_3_0_3,
+    replacement: paddedReplacement(
+      BEFORE_QUIT_TARGET_3_0_3,
+      'EA.on("before-quit",t=>{nQt||(t.preventDefault(),uJ=!0,sQt(),Vr&&!Vr.isDestroyed()&&(EA.dock?.hide(),Vr.hide(),Vr.webContents.send("cleanup")))});'
+    ),
+    legacyReplacements: Object.freeze([]),
+  }),
+]);
+const PATCH_PROFILES = Object.freeze({
+  "3.0.0": PATCHES_3_0_0,
+  "3.0.1": PATCHES_3_0_1,
+  "3.0.3": PATCHES_3_0_3,
+});
 
 function fail(message, code = 1) {
   console.error(`[NHA] ${message}`);
@@ -227,7 +264,7 @@ function inspectArchive(asarPath) {
   const patchDefinitions = Object.hasOwn(PATCH_PROFILES, archive.desktopVersion)
     ? PATCH_PROFILES[archive.desktopVersion] : null;
   if (!patchDefinitions) {
-    throw new Error(`Unsupported Nanoleaf Desktop version: ${archive.desktopVersion || "unknown"}; supported: 3.0.0, 3.0.1`);
+    throw new Error(`Unsupported Nanoleaf Desktop version: ${archive.desktopVersion || "unknown"}; supported: ${Object.keys(PATCH_PROFILES).join(", ")}`);
   }
   const patches = Object.fromEntries(patchDefinitions.map((patch) => [
     patch.name,

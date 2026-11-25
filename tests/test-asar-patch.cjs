@@ -20,6 +20,11 @@ const fixtures = {
     'zm.on("before-quit",async t=>{wMt||(t.preventDefault(),U$=!0,Wr&&!Wr.isDestroyed()?(zm.dock?.hide(),Wr.hide(),Wr.webContents.send("cleanup")):TMt())});',
     'async function TMt(){vxe(),await Promise.all([ZP(),oJ(),MTe(),CDt(),S$()]),c1.deinit(),Ti.deinit(),wMt=!0,zm.quit()}',
   ],
+  "3.0.3": [
+    'console.log("Running app version",He.pkg.version);',
+    'EA.on("before-quit",async t=>{nQt||(t.preventDefault(),uJ=!0,Vr&&!Vr.isDestroyed()?(EA.dock?.hide(),Vr.hide(),Vr.webContents.send("cleanup")):sQt())});',
+    'async function sQt(){jwe(),await Promise.allSettled([ZTt(),b8(),eU(),kve(),wEt(),eJ()]),await uz.closeMotionPlayers(),az.deinit(),Is.deinit(),nQt=!0,EA.quit()}',
+  ],
 };
 const digest = (value) => crypto.createHash("sha256").update(value).digest("hex");
 
@@ -70,21 +75,38 @@ function verifyIntegrity(asarPath) {
 }
 
 function verifyCleanupWiring(state, version) {
-  const names = version === "3.0.0"
-    ? ["bxe", "VP", "nJ", "CTe", "jDt", "I$"]
-    : ["vxe", "ZP", "oJ", "MTe", "CDt", "S$"];
-  const cleanupName = version === "3.0.0" ? "vMt" : "TMt";
-  const appName = version === "3.0.0" ? "xm" : "zm";
+  const profiles = {
+    "3.0.0": { names: ["bxe", "VP", "nJ", "CTe", "jDt", "I$"], cleanup: "vMt", app: "xm", calibration: "s1", manager: "Ti" },
+    "3.0.1": { names: ["vxe", "ZP", "oJ", "MTe", "CDt", "S$"], cleanup: "TMt", app: "zm", calibration: "c1", manager: "Ti" },
+    "3.0.3": { names: ["jwe", "ZTt", "b8", "eU", "kve", "wEt", "eJ"], cleanup: "sQt", app: "EA", calibration: "az", manager: "Is" },
+  };
+  const profile = profiles[version];
+  const { names, cleanup: cleanupName, app: appName } = profile;
   const calls = [];
+  const finalCalls = [];
+  const motionResult = Promise.resolve("motion-players-closed");
   const context = { global: { __nhaQuit: (parallel, final) => {
     assert.deepEqual(Array.from(parallel), names.map(name => context[name]));
-    assert.deepEqual(Array.from(final), [context[version === "3.0.0" ? "s1" : "c1"].deinit, context.Ti.deinit]);
+    if (version === "3.0.3") {
+      assert.equal(final.length, 3);
+      // The wrapper must return the motion cleanup promise so the plugin
+      // awaits it before deinitializing the native libraries.
+      assert.strictEqual(final[0](), motionResult);
+      final[1](); final[2]();
+      assert.deepEqual(finalCalls, ["motion-players", "calibration", "manager"]);
+    } else {
+      assert.deepEqual(Array.from(final), [context[profile.calibration].deinit, context[profile.manager].deinit]);
+    }
     calls.push("cleanup");
     return true;
-  } }, yMt: false, wMt: false, Q$: false, U$: false,
+  } }, yMt: false, wMt: false, nQt: false, Q$: false, U$: false, uJ: false,
   Wr: { isDestroyed: () => false, hide: () => calls.push("hide"), webContents: { send: () => calls.push("signal") } },
   Ti: { deinit: () => {} }, s1: { deinit: () => {} }, c1: { deinit: () => {} },
+  uz: { closeMotionPlayers() { assert.strictEqual(this, context.uz); finalCalls.push("motion-players"); return motionResult; } },
+  az: { deinit() { assert.strictEqual(this, context.az); finalCalls.push("calibration"); } },
+  Is: { deinit() { assert.strictEqual(this, context.Is); finalCalls.push("manager"); } },
   };
+  context.Vr = context.Wr;
   for (const name of names) context[name] = () => {};
   let handler;
   context[appName] = { on: (event, fn) => { assert.equal(event, "before-quit"); handler = fn; },
@@ -114,7 +136,7 @@ try {
     run(patcher, "check", asarPath, 0);
     const state = readState();
     assert.equal(state.desktopVersion, version);
-    assert.equal(state.pluginVersion, "1.1.7");
+    assert.equal(state.pluginVersion, "1.1.8");
     assert.equal(state.beforeHash, digest(officialBytes));
     assert.equal(state.appliedPatches.length, 3);
     verifyCleanupWiring(state, version);
@@ -143,26 +165,28 @@ try {
   // Official update replaces the archive while the previous patch-state remains.
   const sentinelConfig = Buffer.from('{"token":"TEST_ONLY_TOKEN","devices":{}}');
   fs.writeFileSync(path.join(temporaryRoot, "config.json"), sentinelConfig);
-  writeSyntheticArchive(asarPath, "3.0.1");
-  const newOfficialBytes = fs.readFileSync(asarPath);
-  run(patcher, "patch", asarPath, 0);
-  const newState = readState();
-  assert.notEqual(newState.backupPath, oldState.backupPath);
-  assert.equal(newState.beforeHash, digest(newOfficialBytes));
-  assert.deepEqual(fs.readFileSync(path.join(temporaryRoot, "config.json")), sentinelConfig);
-  const patched301 = fs.readFileSync(asarPath);
+  for (const nextVersion of ["3.0.1", "3.0.3"]) {
+    const priorState = readState();
+    writeSyntheticArchive(asarPath, nextVersion);
+    const newOfficialBytes = fs.readFileSync(asarPath);
+    run(patcher, "patch", asarPath, 0);
+    const newState = readState();
+    assert.notEqual(newState.backupPath, priorState.backupPath);
+    assert.equal(newState.beforeHash, digest(newOfficialBytes));
+    assert.deepEqual(fs.readFileSync(path.join(temporaryRoot, "config.json")), sentinelConfig);
+    const patchedBytes = fs.readFileSync(asarPath);
 
-  fs.writeFileSync(statePath, JSON.stringify({ ...newState, backupPath: oldState.backupPath, beforeHash: oldState.beforeHash }));
-  run(patcher, "restore", asarPath, 1);
-  assert.deepEqual(fs.readFileSync(asarPath), patched301);
-  fs.writeFileSync(statePath, JSON.stringify({ ...newState, beforeHash: "0".repeat(64) }));
-  run(patcher, "restore", asarPath, 1);
-  assert.deepEqual(fs.readFileSync(asarPath), patched301);
-  fs.writeFileSync(statePath, JSON.stringify(newState));
-  run(patcher, "restore", asarPath, 0);
-  assert.deepEqual(fs.readFileSync(asarPath), newOfficialBytes);
-  console.log("3.0.0 -> 3.0.1 official update and backup/version/hash guards passed.");
-
+    fs.writeFileSync(statePath, JSON.stringify({ ...newState, backupPath: priorState.backupPath, beforeHash: priorState.beforeHash }));
+    run(patcher, "restore", asarPath, 1);
+    assert.deepEqual(fs.readFileSync(asarPath), patchedBytes);
+    fs.writeFileSync(statePath, JSON.stringify({ ...newState, beforeHash: "0".repeat(64) }));
+    run(patcher, "restore", asarPath, 1);
+    assert.deepEqual(fs.readFileSync(asarPath), patchedBytes);
+    fs.writeFileSync(statePath, JSON.stringify(newState));
+    run(patcher, "restore", asarPath, 0);
+    assert.deepEqual(fs.readFileSync(asarPath), newOfficialBytes);
+  console.log(`${priorState.desktopVersion} -> ${nextVersion} official update and backup/version/hash guards passed.`);
+  }
   for (const markers of [fixtures["3.0.1"].slice(1), [...fixtures["3.0.1"], fixtures["3.0.1"][0]]]) {
     writeSyntheticArchive(asarPath, "3.0.1", markers);
     const bytes = fs.readFileSync(asarPath);
@@ -170,7 +194,7 @@ try {
     run(patcher, "patch", asarPath, 1);
     assert.deepEqual(fs.readFileSync(asarPath), bytes);
   }
-  writeSyntheticArchive(asarPath, "3.0.2", fixtures["3.0.1"]);
+  writeSyntheticArchive(asarPath, "3.0.4", fixtures["3.0.3"]);
   const unknownBytes = fs.readFileSync(asarPath);
   run(patcher, "patch", asarPath, 1);
   assert.deepEqual(fs.readFileSync(asarPath), unknownBytes);

@@ -20,7 +20,7 @@ async function main() {
     }));
     fs.writeFileSync(path.join(electronDir, "index.js"), `
       export const app = {
-        getVersion: () => "3.0.0-test",
+        getVersion: () => globalThis.testDesktopVersion || "3.0.0-test",
         once: () => {},
         whenReady: () => new Promise(() => {}),
         setLoginItemSettings: (settings) => { globalThis.testLoginSettings = settings; },
@@ -40,7 +40,7 @@ async function main() {
     `);
 
     const source = fs.readFileSync(path.join(root, "m.mjs"), "utf8") +
-      "\nexport { loadConfig, saveConfig, selectedDevices, yamlConfig, applyAutoStart };\n";
+      "\nexport { loadConfig, saveConfig, selectedDevices, yamlConfig, applyAutoStart, officialCleanupNames, normalizeFinalCleanupSteps };\n";
     const modulePath = path.join(temporaryRoot, "m.mjs");
     fs.writeFileSync(modulePath, source);
     const plugin = await import(pathToFileURL(modulePath).href);
@@ -70,6 +70,19 @@ async function main() {
     plugin.applyAutoStart(false);
     assert.equal(globalThis.testLoginSettings.openAtLogin, false);
     delete globalThis.testLoginSettings;
+
+    globalThis.testDesktopVersion = "3.0.3";
+    assert.deepEqual(plugin.officialCleanupNames().parallel, [
+      "dns-sd", "audio-orchestrator", "hid-devices", "kpi-events",
+      "ltpdu-connections", "device-mqtt", "remote-app-mqtt",
+    ]);
+    const finalSteps = [async () => {}, () => {}, () => {}];
+    const normalized = plugin.normalizeFinalCleanupSteps(finalSteps);
+    assert.strictEqual(normalized.steps, finalSteps);
+    assert.deepEqual(normalized.names, ["motion-players", "colour-calibration", "ltpdu-client-manager"]);
+    delete globalThis.testDesktopVersion;
+    assert.equal(plugin.officialCleanupNames().parallel.length, 6);
+    assert.deepEqual(plugin.normalizeFinalCleanupSteps([]).names, ["colour-calibration", "ltpdu-client-manager"]);
 
     const yaml = plugin.yamlConfig();
     assert(yaml.includes("http://192.0.2.20:17654/device/j"));
